@@ -1444,12 +1444,20 @@ def prepare_layout_data(payload, now=None):
         if days_to_sat <= 0: days_to_sat += 7
         sat     = now + timedelta(days=days_to_sat)
         sun     = sat + timedelta(days=1)
-        sat_h   = [h for h in hp if h.get("time_local", "").startswith(sat.strftime("%Y-%m-%d"))]
-        sun_h   = [h for h in hp if h.get("time_local", "").startswith(sun.strftime("%Y-%m-%d"))]
         
-        # --- ZMIANA : Dni prosto z jedynego źródła prawdy ---
+        sat_str = sat.strftime("%Y-%m-%d")
+        sun_str = sun.strftime("%Y-%m-%d")
         
-        #lang_days = DAYS_SHORT.get(lang, DAYS_SHORT["pl"])
+        # 1. Sprawdzamy kondycję modelu Yr.no dla tych konkretnych dni
+        daily_diag = payload.get("daily_diag", {})
+        n_yr_sat = daily_diag.get(sat_str, {}).get("n_yr", 0)
+        n_yr_sun = daily_diag.get(sun_str, {}).get("n_yr", 0)
+
+        # 2. Wymuszamy Yr.no (hy), żeby zgadzało się z kartą /future!
+        # Jeśli Yr.no ma błąd (n_yr < 3), robimy fallback do Open-Meteo (ho)
+        sat_h = [h for h in (hy if n_yr_sat >= 3 else ho) if h.get("time_local", "").startswith(sat_str)]
+        sun_h = [h for h in (hy if n_yr_sun >= 3 else ho) if h.get("time_local", "").startswith(sun_str)]
+        
         lang_days = DAYS_SHORT.get(lang, DAYS_SHORT["en"])
         
         # Podajemy słownik payload do weryfikatora
