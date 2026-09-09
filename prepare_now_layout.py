@@ -155,17 +155,21 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     bmin = min(temps) if temps else 0
     bmax = max(temps) if temps else 0
     
-    precips = [float(h.get("precip_eff_mm", h.get("precip_mm")) or 0) for dt, h in ta_tuples]
+    # 1. HORYZONT HERO: Odcinamy daleką przyszłość. 
+    # Bierzemy tylko 4 najbliższe godziny, żeby deszcz o 03:00 nie psuł słońca o 16:00!
+    hero_ta_tuples = ta_tuples[:4]
+    
+    precips = [float(h.get("precip_eff_mm", h.get("precip_mm")) or 0) for dt, h in hero_ta_tuples]
     max_precip = max(precips) if precips else 0
     
-    # Szukamy max POP (prawdopodobieństwo) w oknie 12h
-    max_pop = max((float(h.get("precip_prob_pct", h.get("pop_pct", h.get("pop", 0)))) for dt, h in ta_tuples), default=0)
+    # Szukamy max POP i średnich chmur tylko dla najbliższych 4 godzin
+    max_pop = max((float(h.get("precip_prob_pct", h.get("pop_pct", h.get("pop", 0)))) for dt, h in hero_ta_tuples), default=0)
     pop_val = int(max_pop)
     pop_str = f" ({pop_val}%)" if pop_val > 0 else ""
     
-    avg_clouds = sum(_eff_cld_consensus(h) for dt, h in ta_tuples) / len(ta_tuples) if ta_tuples else 0
+    avg_clouds = sum(_eff_cld_consensus(h) for dt, h in hero_ta_tuples) / len(hero_ta_tuples) if hero_ta_tuples else 0
     
-    # POPRAWKA WIATRU DLA HERO: Teraz bierzemy pod uwagę potężne porywy z 12 godzin!
+    # POPRAWKA WIATRU DLA HERO: Tutaj skanujemy całe 12h, żeby ostrzec przed nadciągającą wichurą
     max_wind_12h = max((float(h.get("gust_kmh") or h.get("wind_kmh") or 0) for dt, h in ta_tuples), default=0)
 
     # Ujednolicona Złota Skala Wiatru (Hero odzywa się dopiero przy zagrożeniach)
@@ -174,7 +178,7 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     elif max_wind_12h >= 60: hero_wind = "silny wiatr"
     else: hero_wind = ""
 
-    # 1. Określenie tła wizualnego (Chmury) z blokadą fizyczną
+    # Określenie tła wizualnego (Chmury) z blokadą fizyczną
     if (max_precip > 0.1 or pop_val >= 40) and avg_clouds < 30:
         avg_clouds = 30  
 
@@ -204,11 +208,11 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         base_sky = "Pochmurno"
         hero_icon_bg = "wk_overcast"
 
-    # 2. Łączenie chmur z opadami
+    # 2. Łączenie chmur z opadami (tylko w oknie 4 godzin!)
     if max_precip > 0:
         has_storm = False; has_snow = False; has_sleet = False; has_real_rain = False; has_drizzle = False
         
-        for dt, h in ta_tuples:
+        for dt, h in hero_ta_tuples:
             prc = float(h.get("precip_eff_mm", h.get("precip_mm")) or 0)
             if prc > 0:
                 tmp = h.get("temp_c", 0)
@@ -217,8 +221,6 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
                 cld = _eff_cld_consensus(h)
                 
                 kind = classify_precip(prc, tmp, sym, w_code)
-                
-                # JEDNO ŹRÓDŁO PRAWDY: Pytamy funkcji od ikon, jak sklasyfikowała ten opad dla bloku na dole!
                 icon = _now_icon(cld, prc, tmp, dt.hour, kind=kind, symbol_code=sym)
                 
                 if icon in ["wk_storm", "wk_sun_storm"]: has_storm = True
@@ -245,13 +247,61 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
 
         sky_desc = f"{precip_desc.capitalize()}{pop_str}"
     else:
-        # Ufamy Norwegom! Zero opadów na radarze = brak straszenia wysokim POP.
+        # Ufamy Norwegom! Zero opadów w ciągu 4h = brak straszenia wysokim POP.
         sky_desc = base_sky
         hero_icon = hero_icon_bg
         
     if sky_desc == "Bezchmurnie" and 6 <= now.hour < 20:
         if avg_clouds <= 3.0 and max_wind_12h < 30:
             sky_desc = "Bezchmurnie, pogoda jak kryształ"
+            
+    # ==================================================================
+    # NOWY KOD: DYNAMICZNY CZAS TRWANIA STANU POGODY ("do 19:00")
+    # ==================================================================
+    change_hour = None
+    sky_lower = sky_desc.lower()
+    
+    is_sunny_clear = any(x in sky_lower for x in ["słonecz", "bezchmurn", "pogodni", "kryształ"])
+    is_cloudy = any(x in sky_lower for x in ["pochmurn", "dużo chmur", "przejaśn"])
+    is_precip = max_precip > 0
+    
+    # Skanujemy najbliższe 8 godzin w poszukiwaniu przełamania pogody
+    max_lookahead = min(8, len(ta_tuples))
+    
+    for i in range(1, max_lookahead):
+        dt_next, h_next = ta_tuples[i]
+        
+        prc_next = _precip_consensus(h_next, hours) if hours else float(h_next.get("precip_eff_mm", h_next.get("precip_mm")) or 0)
+        cld_next = _eff_cld_consensus(h_next)
+        
+        if is_precip:
+            if prc_next <= 0.05:  # Szukamy kiedy przestanie padać
+                change_hour = dt_next.hour
+                break
+        elif is_sunny_clear:
+            if cld_next >= 65 or prc_next > 0:  # Szukamy kiedy nadejdą grube chmury lub deszcz
+                change_hour = dt_next.hour
+                break
+        elif is_cloudy:
+            if cld_next <= 35 or prc_next > 0:  # Szukamy kiedy się wypogodzi lub zacznie padać
+                change_hour = dt_next.hour
+                break
+
+    if change_hour is not None:
+        # Zabezpieczenie przed absurdem "Słonecznie do 22:00" - logicznie słońce zachodzi o zmroku
+        if "słonecz" in sky_lower and (change_hour >= 20 or change_hour <= 4):
+            pass # Pomijamy dodawanie "do", zostawiając po prostu "Słonecznie"
+        else:
+            # Wstawiamy w odpowiednim języku, np. " do 19:00"
+            suffix = f" {t(lang, 'until')} {change_hour:02d}:00"
+            
+            # Sprytne dołączenie: jeśli na końcu jest "(71%)", wciskamy godzinę przed nawias!
+            if pop_str and sky_desc.endswith(pop_str):
+                base_part = sky_desc[:-len(pop_str)]
+                sky_desc = f"{base_part}{suffix}{pop_str}"
+            else:
+                sky_desc += suffix
+    # ==================================================================
 
     # Bezpieczne klejenie drugiej linii Hero (Wiatr + Ciśnienie)
     hero_line2_parts = []
@@ -268,6 +318,28 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     hero_line2 = " · ".join(hero_line2_parts)
     hero_summary = f"{sky_desc}\n{hero_line2}" if hero_line2 else sky_desc 
 
+    # ==================================================================
+    # --- TWARDA KOREKTA WIZUALNA (SATELITA ZABIJA KŁAMSTWA MODELI) ---
+    # ==================================================================
+    if should_call_owm and 'owm' in locals() and owm:
+        real_clouds = owm.get("clouds")
+        if real_clouds is not None:
+            # Jeśli modele dały na kartę słońce, a satelita widzi > 70% chmur
+            if "sun" in hero_icon or "clear" in hero_icon:
+                if real_clouds >= 70:
+                    # Twarda podmiana ikony
+                    hero_icon = "wk_overcast" if real_clouds >= 85 else "wk_mostly_cloudy"
+                    nowa_baza = "Pochmurno" if real_clouds >= 85 else "Dużo chmur"
+                    
+                    # Twarda podmiana głównego tekstu na karcie
+                    if "\n" in hero_summary:
+                        parts = hero_summary.split("\n", 1)
+                        hero_summary = f"{nowa_baza} (radar)\n{parts[1]}"
+                    else:
+                        hero_summary = f"{nowa_baza} (radar)"
+    # ==================================================================
+
+    
     # --- BUDOWA 12 BLOKÓW GODZINOWYCH ---
     today_blocks = []
     for dt, h in ta_tuples:

@@ -759,7 +759,9 @@ def _build_day_summary(hp: list, date_str: str, is_night_mode: bool = False) -> 
             pop_for_badge = ""   # wyciszamy % przy wietrze, mgle, chmurach itd.
 
     # --- BLOKADA FIZYCZNA
-    if (badge or pop_val >= 40) and avg_eff_c < 45:
+    # Podbijamy chmury tylko jeśli deszcz/śnieg występuje ZA DNIA. Nocny opad nie powinien psuć słonecznej ikony.
+    is_daytime_precip_strictly = (has_rain_m or has_rain_a or has_snow_m or has_snow_a or has_storm_m or has_storm_a)
+    if is_daytime_precip_strictly and (badge or pop_val >= 40) and avg_eff_c < 45:
         avg_eff_c = 45  # Sztucznie podbijamy minimum do "Przejaśnienia"
 
     # 1. Określenie tła wizualnego
@@ -1496,6 +1498,9 @@ def prepare_layout_data(payload, now=None):
     # --- INTELIGENTNY GATING OWM (Leniwa Weryfikacja 2.0) ---
     should_call_owm = False
     forecast_source = payload.get("forecast_source", "OpenMeteo + Yr.no")
+    # 0. Dla radaru taktycznego ZAWSZE podglądamy satelitę
+    if payload.get("is_now"):
+        should_call_owm = True
     
     # 1. Fallback (brak jednego ze źródeł)
     if " + " not in forecast_source:
@@ -1535,6 +1540,27 @@ def prepare_layout_data(payload, now=None):
         )
         if (not final_context_line) or pressure_only:
             final_context_line = (final_context_line + " · " + owm_note) if final_context_line else owm_note
+            
+    # ==================================================================
+    # --- TWARDA KOREKTA WIZUALNA (SATELITA ZABIJA KŁAMSTWA MODELI) ---
+    # ==================================================================
+    if should_call_owm and 'owm' in locals() and owm:
+        real_clouds = owm.get("clouds")
+        if real_clouds is not None:
+            # Jeśli modele dały na kartę słońce, a satelita widzi > 70% chmur
+            if "sun" in hero_icon or "clear" in hero_icon:
+                if real_clouds >= 70:
+                    # Twarda podmiana ikony
+                    hero_icon = "wk_overcast" if real_clouds >= 85 else "wk_mostly_cloudy"
+                    nowa_baza = "Pochmurno" if real_clouds >= 85 else "Dużo chmur"
+                    
+                    # Twarda podmiana głównego tekstu na karcie
+                    if "\n" in hero_summary_line:
+                        parts = hero_summary_line.split("\n", 1)
+                        hero_summary_line = f"{nowa_baza} (radar)\n{parts[1]}"
+                    else:
+                        hero_summary_line = f"{nowa_baza} (radar)"
+    # ==================================================================
     # --- AWARYJNY SENSOR MŻAWKI ---
     # Jeśli OWM nie było potrzebne (should_call_owm=False) LUB API nie dało notatki, 
     # zawsze możemy jeszcze użyć hintu
