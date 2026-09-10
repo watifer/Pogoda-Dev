@@ -76,6 +76,8 @@ def build_daily_diagnostics(hours_list, location_name, fetched_at_local=None):
         diagnostics[date_str] = {
             "max_om": max_om,
             "max_yr": max_yr,
+            "min_om": min_om,  
+            "min_yr": min_yr,  
             "spread_max": spread_max,
             "spread_min": spread_min,
             "spread": spread_max, # Zostawiamy dla kompatybilności wstecznej
