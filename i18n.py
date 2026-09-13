@@ -845,6 +845,8 @@ REPLACEMENTS = {
         ("przelotna ", "passing "),
         ("ulewny deszcz:", "Heavy rain:"),
         ("ulewny deszcz", "heavy rain"),
+        ("możliwe dziś ", "possible today "),
+        ("obecnie ", "currently "),
         
         # --- ALERTY Z WEATHER_PAYLOAD ---
         ("prognozowane są niszczące porywy do", "destructive gusts forecast up to"),
@@ -1054,6 +1056,8 @@ REPLACEMENTS = {
         ("przejaśnienia", "partiellement nuageux"),
         ("dużo chmur", "très nuageux"),
         ("pochmurno", "couvert"),
+        ("możliwe dziś ", "possible today "),
+        ("obecnie ", "currently "),
         
         # --- ALERTY Z WEATHER_PAYLOAD ---
         ("prognozowane są niszczące porywy do", "rafales destructrices prévues jusqu'à"),
@@ -1259,6 +1263,8 @@ REPLACEMENTS = {
         ("przejaśnienia", "teils bewölkt"),
         ("dużo chmur", "meist bewölkt"),
         ("pochmurno", "bedeckt"),
+        ("możliwe dziś ", "heute möglich "),
+        ("obecnie ", "aktuell "),
         
         ("spodziewany jest wzrost temperatury do", "Erwarteter Temperaturanstieg auf bis zu"),
         ("w dzień tylko", "tagsüber nur"),
@@ -1443,6 +1449,9 @@ REPLACEMENTS = {
         ("przejaśnienia", "parcialmente nublado"),
         ("dużo chmur", "mayormente nublado"),
         ("pochmurno", "nublado"),
+        ("możliwe dziś ", "posible hoy "),
+        ("obecnie ", "actualmente "),
+        
         # --- ALERTY Z WEATHER_PAYLOAD ---
         ("prognozowane są niszczące porywy do", "se pronostican ráfagas destructivas de hasta"),
         ("prognozowane są porywy sięgające", "se pronostican ráfagas de hasta"),
@@ -1638,6 +1647,9 @@ REPLACEMENTS = {
         ("przejaśnienia", "delvis skyet"),
         ("dużo chmur", "mest overskyet"),
         ("pochmurno", "overskyet"),
+        ("możliwe dziś ", "mulig i dag "),
+        ("obecnie ", "nå "),
+        
         # --- ALERTY Z WEATHER_PAYLOAD ---
         ("prognozowane są niszczące porywy do", "det varsles ødeleggende vindkast opptil"),
         ("prognozowane są porywy sięgające", "det varsles vindkast opptil"),

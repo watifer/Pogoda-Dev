@@ -1420,13 +1420,10 @@ def prepare_layout_data(payload, now=None):
     forecast_source = payload.get("forecast_source", "OpenMeteo + Yr.no")
     if payload.get("is_now"):
         should_call_owm = True
-    
-    if " + " not in forecast_source:
+    elif " + " not in forecast_source:
         should_call_owm = True
-        
     elif final_context_line and any(x in final_context_line.lower() for x in ["rozbieżne", "niepewn", "wczesny", "nocne", "divergent", "uncertain", "early", "night"]):
         should_call_owm = True
-        
     elif hours:
         today_str = now.strftime("%Y-%m-%d")
         current_h = next((h for h in hours if h.get("time_local", "").startswith(today_str) and len(h.get("time_local", "")) >= 13 and int(h["time_local"][11:13]) == now.hour), None)
@@ -1439,15 +1436,17 @@ def prepare_layout_data(payload, now=None):
             if mm_now < 0.1 and rh >= 85 and cld >= 85:
                 should_call_owm = True
 
+    # Zawsze używaj satelity, jeśli weather_payload go pobrał. 
+    # Jeśli nie, a jest to wymagane (should_call_owm), dociągnij dane w locie.
+    owm = payload.get("owm_current")
+    if not owm and should_call_owm:
+        try:
+            owm = get_current_weather(payload["location"]["lat"], payload["location"]["lon"], timeout_sec=3)
+        except Exception:
+            pass
+
     owm_note = None
-    if should_call_owm:
-        # Check if owm_current was already safely fetched and passed in the payload
-        owm = payload.get("owm_current")
-        if not owm:
-            try:
-                owm = get_current_weather(payload["location"]["lat"], payload["location"]["lon"], timeout_sec=3)
-            except Exception:
-                pass
+    if owm:
         owm_note = nowcast_note(payload_hours=payload.get("hours", []), now_local=now, owm=owm, lang=lang)
 
     if owm_note:
@@ -1461,20 +1460,66 @@ def prepare_layout_data(payload, now=None):
     # ==================================================================
     # --- TWARDA KOREKTA WIZUALNA (SATELITA ZABIJA KŁAMSTWA MODELI) ---
     # ==================================================================
-    if should_call_owm and 'owm' in locals() and owm:
-        real_clouds = owm.get("clouds")
+    if owm:
+        current_data = owm.get("data", [{}])[0] if "data" in owm else owm
+        
+        real_clouds = current_data.get("clouds")
+        real_uvi = float(current_data.get("uvi") or 0.0)
+
         if real_clouds is not None:
+            nowa_baza = None
+            
+            # Określenie bieżącego bloku widocznego na karcie (dynamiczny start)
+            h = now.hour
+            if 6 <= h < 11:
+                blok = f"{h:02d}-10"
+            elif 11 <= h < 17:
+                blok = f"{h:02d}-16"
+            elif 17 <= h < 22:
+                blok = f"{h:02d}-22"
+            else:
+                blok = "noc"
+                
+            # Detektor cienkich chmur i prześwitów słońca
+            if real_clouds >= 85 and real_uvi > 1.2 and not hero_is_night:
+                real_clouds = 65  # Sztucznie zbijamy zachmurzenie do progu "Przejaśnienia"
+            
+            # 1. Modele kłamią, że jest słońce -> Poprawiamy na chmury
             if "sun" in hero_icon or "clear" in hero_icon:
-                if real_clouds >= 70:
-                    hero_icon = "wk_overcast" if real_clouds >= 85 else "wk_mostly_cloudy"
-                    nowa_baza = "Pochmurno" if real_clouds >= 85 else "Dużo chmur"
+                if real_clouds >= 85:
+                    hero_icon = "wk_overcast"
+                    nowa_baza = "Pochmurno"
+                elif real_clouds >= 70:
+                    hero_icon = "wk_mostly_cloudy"
+                    nowa_baza = "Dużo chmur"
+            
+            # 2. Modele kłamią, że jest pochmurno -> Poprawiamy na słońce/przejaśnienia
+            elif "cloud" in hero_icon or "overcast" in hero_icon:
+                if real_clouds <= 35:
+                    hero_icon = "wk_moon_one_cloud" if hero_is_night else "wk_sun_one_cloud"
+                    nowa_baza = "Pogodnie" if hero_is_night else "Słonecznie"
+                elif real_clouds < 75:
+                    hero_icon = "wk_partlycloudy_night" if hero_is_night else "wk_partlycloudy"
+                    nowa_baza = "Przejaśnienia"
+                elif real_clouds < 85:
+                    hero_icon = "wk_mostly_cloudy"
+                    nowa_baza = "Dużo chmur"
+
+            if nowa_baza:
+                # Inteligentny prefiks zachowujący poprawność gramatyczną
+                if nowa_baza == "Przejaśnienia" and not hero_is_night:
+                    prefix = "Możliwe dziś "
+                else:
+                    prefix = "Obecnie "
                     
-                    if "\n" in hero_summary_line:
-                        parts = hero_summary_line.split("\n", 1)
-                        hero_summary_line = f"{nowa_baza} (radar)\n{parts[1]}"
-                    else:
-                        hero_summary_line = f"{nowa_baza} (radar)"
-                        
+                nowy_napis = f"{prefix}{nowa_baza.lower()} ({blok})"
+                nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
+                
+                if "\n" in hero_summary_line:
+                    parts = hero_summary_line.split("\n", 1)
+                    hero_summary_line = f"{nowy_napis}\n{parts[1]}"
+                else:
+                    hero_summary_line = nowy_napis
     # --- AWARYJNY SENSOR MŻAWKI ---
     if not final_context_line:
         hint = _drizzle_hint(ta=ta, hp_all=hours, start_hour=hero_start_hour)

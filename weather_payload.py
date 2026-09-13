@@ -7,7 +7,7 @@ Airly jest opcjonalne i best-effort.
 from __future__ import annotations
 
 import os
-ENABLE_OWM_NOWCAST = os.getenv("ENABLE_OWM_NOWCAST", "0") == "1"
+ENABLE_OWM_NOWCAST = os.getenv("ENABLE_OWM_NOWCAST", "1") == "1"
 import time
 import requests
 from requests.adapters import HTTPAdapter
