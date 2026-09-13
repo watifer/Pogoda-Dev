@@ -7,6 +7,7 @@ Airly jest opcjonalne i best-effort.
 from __future__ import annotations
 
 import os
+ENABLE_OWM_NOWCAST = os.getenv("ENABLE_OWM_NOWCAST", "0") == "1"
 import time
 import requests
 from requests.adapters import HTTPAdapter
@@ -136,6 +137,20 @@ def _kmh_from_ms(ms):
 
 def _to_local(dt_utc: datetime, tz: ZoneInfo) -> datetime:
     return dt_utc.astimezone(tz)
+    
+_OWM_CACHE = {}  # Format: (lat, lon) -> (ts, data)
+
+def _get_owm_cached(lat: float, lon: float, ttl_sec: int = 180):
+    key = (round(lat, 2), round(lon, 2))
+    now = time.time()
+    
+    if key in _OWM_CACHE and (now - _OWM_CACHE[key][0] < ttl_sec):
+        return _OWM_CACHE[key][1]
+        
+    from owm_nowcast import get_current_weather
+    data = get_current_weather(lat, lon, timeout_sec=8)
+    _OWM_CACHE[key] = (now, data)
+    return data
 
 
 # ═══════════════════════════════════════
@@ -572,6 +587,13 @@ def build_payload_for_location(
     
    
 
+    owm_live = None
+    if ENABLE_OWM_NOWCAST:
+        try:
+            owm_live = _get_owm_cached(lat, lon, ttl_sec=180)
+        except Exception as e:
+            print(f"[weather_payload] Błąd pobierania OWM_NOWCAST: {e}")
+
     return {
         "version": "1.0",
         "location": {
@@ -581,7 +603,7 @@ def build_payload_for_location(
             "tz":   tz_name,
         },
         "generated_at_local": now_dt.isoformat(timespec="seconds"),
-        "model_updated_at_local": yr_updated_at,  # <--- NOWOŚĆ: Przekazujemy do frontend'u!
+        "model_updated_at_local": yr_updated_at,
         "forecast_source":    forecast_source,
         "model_agreement":    None,
         "airly":              airly,
@@ -589,5 +611,6 @@ def build_payload_for_location(
         "hours":              forecast_hours,
         "alerts":             active_alerts,
         "daily_diag":         daily_diag,
-        "lang":               lang,  # <---  (Nasz kurier z językiem!)
+        "owm_current":        owm_live,
+        "lang":               lang,
     }

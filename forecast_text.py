@@ -418,3 +418,28 @@ def build_block_copy(block: BlockForecast, lang: str = "pl",
         "feels_like_text": feels_text,
         "feels_like_spans": feels_spans,
     }
+    
+from typing import Tuple
+
+SKY_RANK = {
+    "Bezchmurnie": 0,
+    "Słonecznie": 1,
+    "Pogodnie": 1,
+    "Przejaśnienia": 2,
+    "Dużo chmur": 3,
+    "Pochmurno": 4,
+}
+
+def sky_from_clouds(cld_pct: float, is_night: bool) -> Tuple[str, str]:
+    """Wewnętrzny słownik progów zachmurzenia (zawsze zwraca bazowy PL)."""
+    if cld_pct <= 10:
+        return ("Bezchmurnie", "wk_clear_night" if is_night else "wk_clear")
+    elif cld_pct <= 35:
+        return ("Pogodnie" if is_night else "Słonecznie",
+                "wk_moon_one_cloud" if is_night else "wk_sun_one_cloud")
+    elif cld_pct < 70:
+        return ("Przejaśnienia", "wk_partlycloudy_night" if is_night else "wk_partlycloudy")
+    elif cld_pct < 85:
+        return ("Dużo chmur", "wk_mostly_cloudy")
+    else:
+        return ("Pochmurno", "wk_overcast")
