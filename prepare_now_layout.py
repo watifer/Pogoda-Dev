@@ -407,21 +407,52 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     hero_summary = f"{sky_desc}\n{hero_line2}" if hero_line2 else sky_desc 
 
     # ==================================================================
-    # --- TWARDA KOREKTA WIZUALNA (SATELITA ZABIJA KŁAMSTWA MODELI) ---
+    # --- TWARDA KOREKTA WIZUALNA DLA KARTY /NOW ---
     # ==================================================================
     if should_call_owm and 'owm' in locals() and owm:
-        real_clouds = owm.get("clouds")
+        current_data = owm.get("data", [{}])[0] if "data" in owm else owm
+        
+        real_clouds = current_data.get("clouds")
+        real_uvi = float(current_data.get("uvi") or 0.0)
+
         if real_clouds is not None:
+            nowa_baza = None
+            
+            # Detektor cienkich chmur i prześwitów słońca
+            if real_clouds >= 85 and real_uvi > 1.2 and not hero_is_night:
+                real_clouds = 65  # Zbijamy do progu "Przejaśnienia"
+                
+            # 1. Modele kłamią, że jest słońce -> Poprawiamy na chmury
             if "sun" in hero_icon or "clear" in hero_icon:
-                if real_clouds >= 70:
-                    hero_icon = "wk_overcast" if real_clouds >= 85 else "wk_mostly_cloudy"
-                    nowa_baza = "Pochmurno" if real_clouds >= 85 else "Dużo chmur"
+                if real_clouds >= 85:
+                    hero_icon = "wk_overcast"
+                    nowa_baza = "Pochmurno"
+                elif real_clouds >= 70:
+                    hero_icon = "wk_mostly_cloudy"
+                    nowa_baza = "Dużo chmur"
                     
-                    if "\n" in hero_summary:
-                        parts = hero_summary.split("\n", 1)
-                        hero_summary = f"{nowa_baza} (radar)\n{parts[1]}"
-                    else:
-                        hero_summary = f"{nowa_baza} (radar)"
+            # 2. Modele kłamią, że jest pochmurno -> Poprawiamy na słońce/przejaśnienia
+            elif "cloud" in hero_icon or "overcast" in hero_icon:
+                if real_clouds <= 35:
+                    hero_icon = "wk_moon_one_cloud" if hero_is_night else "wk_sun_one_cloud"
+                    nowa_baza = "Pogodnie" if hero_is_night else "Słonecznie"
+                elif real_clouds < 75:
+                    hero_icon = "wk_partlycloudy_night" if hero_is_night else "wk_partlycloudy"
+                    nowa_baza = "Przejaśnienia"
+                elif real_clouds < 85:
+                    hero_icon = "wk_mostly_cloudy"
+                    nowa_baza = "Dużo chmur"
+
+            if nowa_baza:
+                prefix = "Obecnie "
+                nowy_napis = f"{prefix}{nowa_baza.lower()}"
+                nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
+                
+                if "\n" in hero_summary:
+                    parts = hero_summary.split("\n", 1)
+                    hero_summary = f"{nowy_napis}\n{parts[1]}"
+                else:
+                    hero_summary = nowy_napis
 
     # --- BUDOWA 12 BLOKÓW GODZINOWYCH ---
     today_blocks = []
