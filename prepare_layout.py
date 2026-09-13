@@ -66,7 +66,7 @@ def _is_night_from_symbol_or_time(h: dict) -> bool:
         return False
 
 
-def _drizzle_hint(ta: list, hp_all: list, start_hour: int) -> str | None:
+def _drizzle_hint(ta: list, hp_all: list, start_hour: int) -> Optional[str]:
     """
     Miękka podpowiedź: możliwe pojedyncze krople mimo 0.0 mm w modelu.
     Umiarkowane progi + warunek 2 kolejnych godzin, żeby nie spamować.
