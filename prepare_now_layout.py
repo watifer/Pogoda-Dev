@@ -371,10 +371,16 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
                 kind_late = classify_precip(prc_late, tmp_late, sym_late, w_code_late)
                 
                 # Zamiast twardego polskiego tekstu, przypisujemy klucze systemowe
-                if kind_late in ["storm"]: late_key = "storms"
-                elif kind_late in ["snow", "heavy_snow", "light_snow"]: late_key = "snow"
-                elif kind_late in ["sleet"]: late_key = "sleet"
-                else: late_key = "rain"
+                if kind_late in ["storm"]: 
+                    late_key = "storms"
+                elif kind_late in ["snow", "heavy_snow", "light_snow"] or (tmp_late <= 2.0 and kind_late not in ["sleet"]): 
+                    late_key = "snow"
+                elif kind_late in ["sleet"]: 
+                    late_key = "sleet"
+                elif kind_late == "drizzle" or prc_late <= 0.5: 
+                    late_key = "drizzle"
+                else: 
+                    late_key = "rain"
                 
                 # Tłumaczymy typ opadu oraz słowo "od" ("from") w locie
                 late_name = t(lang, late_key).lower()
