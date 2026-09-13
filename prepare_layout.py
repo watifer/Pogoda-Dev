@@ -9,7 +9,7 @@ import math
 import statistics
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 
 try:
     from zoneinfo import ZoneInfo
@@ -842,7 +842,7 @@ def _build_weekend_day_teaser(hp: list, day_short: str, payload: dict = None) ->
 # BLOKI CZASU — definicje
 # ═══════════════════════════════════════
 
-def _get_time_blocks(hour: int) -> tuple[str, list]:
+def _get_time_blocks(hour: int) -> Tuple[str, list]:
     if hour < 12:
         return "Prognoza na dziś", [
             {"label": "Rano",       "start": 6,  "end": 10},
