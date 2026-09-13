@@ -14,6 +14,7 @@ from prepare_layout import _fmt_temp, _feels_like, DNI_PL, _hour_safe, _eff_cld_
 from i18n import t, DAYS_FULL
 from i18n import translate_weather_text
 from forecast_text import classify_precip, KINDS
+from forecast_text import sky_from_clouds
 from ui_softening import strip_mm_pct_parens, soften_possible_prefix
 from prepare_layout import _fmt_temp, _feels_like, DNI_PL, _hour_safe, _eff_cld_consensus, _drizzle_hint
 
@@ -179,25 +180,47 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     else:
         hero_is_night = now.hour >= 20 or now.hour < 6
 
-    # ==================================================================
-    # HELPER DO STANU CHMUR (UJEDNOLICONY DLA CAŁEGO PLIKU)
-    # ==================================================================
-    def sky_from_clouds(cld_pct: float, is_night: bool):
-        if cld_pct <= 10:
-            return ("Bezchmurnie", "wk_clear_night" if is_night else "wk_clear")
-        elif cld_pct <= 35:
-            return ("Pogodnie" if is_night else "Słonecznie",
-                    "wk_moon_one_cloud" if is_night else "wk_sun_one_cloud")
-        elif cld_pct < 70:
-            return ("Przejaśnienia", "wk_partlycloudy_night" if is_night else "wk_partlycloudy")
-        elif cld_pct < 85:
-            return ("Dużo chmur", "wk_mostly_cloudy")
-        else:
-            return ("Pochmurno", "wk_overcast")
+    
 
-    # BAZA CHMUR (WYŁĄCZNIE Z GODZINY 0!)
-    cld_now = _eff_cld_consensus(hero_ta_tuples[0][1]) if hero_ta_tuples else 0
+    # ==================================================================
+    # BAZA CHMUR I TWARDA KOREKTA (LOCAL OVERRIDE DLA GODZINY 0)
+    # ==================================================================
+    h0 = hero_ta_tuples[0][1] if hero_ta_tuples else {}
+    cld_model = _eff_cld_consensus(h0) if h0 else 0
+    label_model, icon_model = sky_from_clouds(cld_model, hero_is_night)
+    
+    cld_now = cld_model
+    radar_changed_label = False
+    
+    if should_call_owm and 'owm' in locals() and owm:
+        current_data = owm.get("data", [{}])[0] if "data" in owm else owm
+        real_clouds = current_data.get("clouds")
+        real_uvi = float(current_data.get("uvi") or 0.0)
+        
+        if real_clouds is not None:
+            real_clouds = float(real_clouds)
+            
+            # Cienkie chmury + UV -> zbijamy procenty
+            if real_clouds >= 85 and real_uvi > 1.2 and not hero_is_night:
+                real_clouds = 65
+                
+            # Override tylko gdy różnica jest duża
+            if abs(real_clouds - cld_model) >= 25:
+                h0["_cld_override"] = real_clouds
+                cld_now = real_clouds
+                label_live, _ = sky_from_clouds(cld_now, hero_is_night)
+                
+                # Zaznaczamy, jeśli korekta zmieniła tekstową kategorię
+                radar_changed_label = (label_live != label_model)
+                
+    # Zapisz flagę do h0, żeby użyć jej później w Hero
+    if h0:
+        h0["_radar_changed_label"] = radar_changed_label
+
+    # Wygenerowanie bazy z uwzględnieniem ewentualnej korekty
     base_sky, hero_icon_bg = sky_from_clouds(cld_now, hero_is_night)
+
+
 
     # ==================================================================
     # 2. Łączenie chmur z opadami (TYLKO okno 4 godzin Hero)
@@ -242,7 +265,7 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
             tmp = h.get("temp_c", 0)
             sym = h.get("symbol_code_eff", h.get("symbol_code")) or ""
             w_code = h.get("weather_code_eff", h.get("weather_code"))
-            cld = _eff_cld_consensus(h)
+            cld = h.get("_cld_override", _eff_cld_consensus(h))
             
             kind = classify_precip(prc, tmp, sym, w_code)
             icon = _now_icon(cld, prc, tmp, dt.hour, kind=kind, symbol_code=sym)
@@ -303,7 +326,8 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         sky_desc = base_sky
         hero_icon = hero_icon_bg
         
-        cld_states = [_eff_cld_consensus(h) for _, h in hero]
+        # Skaner musi brać pod uwagę nadpisane chmury z godziny 0!
+        cld_states = [h.get("_cld_override", _eff_cld_consensus(h)) for _, h in hero]
         good = [c < 70 for c in cld_states]
         bad  = [c >= 70 for c in cld_states]
         
@@ -397,6 +421,13 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
                 sky_desc += f"\n{later_str}: {late_name} {prep_from} {dt_late.hour:02d}:00"
                 break
 
+    # Wstawienie tagu (radar), jeśli flaga jest aktywna i nie ma opadów
+    if h0.get("_radar_changed_label") and max_precip_4h == 0:
+        sky_desc_low = sky_desc[:1].lower() + sky_desc[1:] if sky_desc else ""
+        sky_desc = f"Obecnie {sky_desc_low} (radar)"
+        # Podniesienie pierwszej litery całego zdania na wypadek, gdyby coś się nie zgadzało
+        sky_desc = sky_desc[:1].upper() + sky_desc[1:]
+
     # Bezpieczne klejenie drugiej linii Hero (Wiatr + Ciśnienie)
     hero_line2_parts = []
     if hero_wind: 
@@ -412,60 +443,13 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     hero_line2 = " · ".join(hero_line2_parts)
     hero_summary = f"{sky_desc}\n{hero_line2}" if hero_line2 else sky_desc 
 
-    # ==================================================================
-    # --- TWARDA KOREKTA WIZUALNA DLA KARTY /NOW ---
-    # ==================================================================
-    if should_call_owm and 'owm' in locals() and owm:
-        current_data = owm.get("data", [{}])[0] if "data" in owm else owm
-        
-        real_clouds = current_data.get("clouds")
-        real_uvi = float(current_data.get("uvi") or 0.0)
-
-        if real_clouds is not None:
-            nowa_baza = None
-            
-            # Detektor cienkich chmur i prześwitów słońca
-            if real_clouds >= 85 and real_uvi > 1.2 and not hero_is_night:
-                real_clouds = 65  # Zbijamy do progu "Przejaśnienia"
-                
-            # 1. Modele kłamią, że jest słońce -> Poprawiamy na chmury
-            if "sun" in hero_icon or "clear" in hero_icon:
-                if real_clouds >= 85:
-                    hero_icon = "wk_overcast"
-                    nowa_baza = "Pochmurno"
-                elif real_clouds >= 70:
-                    hero_icon = "wk_mostly_cloudy"
-                    nowa_baza = "Dużo chmur"
-                    
-            # 2. Modele kłamią, że jest pochmurno -> Poprawiamy na słońce/przejaśnienia
-            elif "cloud" in hero_icon or "overcast" in hero_icon:
-                if real_clouds <= 35:
-                    hero_icon = "wk_moon_one_cloud" if hero_is_night else "wk_sun_one_cloud"
-                    nowa_baza = "Pogodnie" if hero_is_night else "Słonecznie"
-                elif real_clouds < 75:
-                    hero_icon = "wk_partlycloudy_night" if hero_is_night else "wk_partlycloudy"
-                    nowa_baza = "Przejaśnienia"
-                elif real_clouds < 85:
-                    hero_icon = "wk_mostly_cloudy"
-                    nowa_baza = "Dużo chmur"
-
-            if nowa_baza:
-                prefix = "Obecnie "
-                nowy_napis = f"{prefix}{nowa_baza.lower()}"
-                nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
-                
-                if "\n" in hero_summary:
-                    parts = hero_summary.split("\n", 1)
-                    hero_summary = f"{nowy_napis}\n{parts[1]}"
-                else:
-                    hero_summary = nowy_napis
-
     # --- BUDOWA 12 BLOKÓW GODZINOWYCH ---
     today_blocks = []
     for dt, h in ta_tuples:
         hour_str = f"{dt.hour:02d}:00"
         
-        cld = _eff_cld_consensus(h)
+        # Pobranie chmur z uwzględnieniem ewentualnego nadpisania
+        cld = h.get("_cld_override", _eff_cld_consensus(h))
         temp = h.get("temp_c", 0)
         prc = float(h.get("precip_eff_mm", h.get("precip_mm")) or 0)
         
