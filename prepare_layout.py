@@ -1512,6 +1512,12 @@ def prepare_layout_data(payload, now=None):
                 else:
                     prefix = "Obecnie "
                     
+                # Naprawa błędu dublowania godzin (np. 16-16 -> 16:00)
+                if "-" in blok:
+                    b_parts = blok.split("-")
+                    if len(b_parts) == 2 and b_parts[0] == b_parts[1]:
+                        blok = f"{b_parts[0]}:00"
+                        
                 nowy_napis = f"{prefix}{nowa_baza.lower()} ({blok})"
                 nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
                 
