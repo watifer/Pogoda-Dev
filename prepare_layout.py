@@ -1264,48 +1264,55 @@ def prepare_layout_data(payload, now=None):
 
     alerts = list(dict.fromkeys(alerts))
 
+    # ==================================================================
+    # Wiatr od morza (Tryb Sztorm vs Plaża)
+    # ==================================================================
     try:
         from coast_runtime import GLOBAL_COAST_STORE, ensure_coast_index
         if GLOBAL_COAST_STORE and ensure_coast_index:
-            from coast_detector import get_or_compute_coast_signature_lazy, is_onshore
+            from coast_detector import get_or_compute_coast_signature_lazy, get_coastal_alert_mode
+            
             loc_lat = payload.get("location", {}).get("lat")
             loc_lon = payload.get("location", {}).get("lon")
+            tz_str = payload.get("location", {}).get("tz", "UTC")
+            
             if loc_lat is not None and loc_lon is not None:
-                
                 sig = get_or_compute_coast_signature_lazy(
-                    store=GLOBAL_COAST_STORE,
-                    lat=loc_lat,
-                    lon=loc_lon,
-                    idx_factory=ensure_coast_index
+                    store=GLOBAL_COAST_STORE, lat=loc_lat, lon=loc_lon, idx_factory=ensure_coast_index
                 )
                 
-                if sig and getattr(sig, "is_coastal", False) and getattr(sig, "sea_sectors", None):
-                    dist = getattr(sig, "distance_to_ocean_km", 999.0) or 999.0
-                    add_t = 8.0 if dist > 10.0 else 0.0
-                    
-                    onshore_hours = []
-                    for h in ta:
-                        try:
-                            hh = int(h.get("time_local", "")[11:13])
-                            if max(8, now.hour) <= hh <= 18:
-                                wdir = float(h.get("wind_dir_deg", 0))
-                                wspd = float(h.get("wind_kmh", 0))
-                                wgst = float(h.get("gust_kmh", h.get("wind_gust_kmh", 0)))
-                                eff_w = max(wspd, wgst)
-                                if is_onshore(wdir, sig.sea_sectors):
-                                    if bmax is not None and bmax >= 16 and tp <= 2.0:
-                                        if wspd >= (22.0 + add_t) or eff_w >= (32.0 + add_t):
-                                            onshore_hours.append(hh)
-                        except Exception:
-                            pass
-                    
-                    if onshore_hours:
-                        start_h = min(onshore_hours)
-                        end_h = max(onshore_hours)
-                        time_str = f"ok. {start_h:02d}:00" if start_h == end_h else f"głównie {start_h:02d}:00–{end_h:02d}:00"
+                beach_hours = []
+                has_storm = False
+                
+                for h in ta:
+                    try:
+                        dt_local = datetime.fromisoformat(h.get("time_local", "").replace("Z", "+00:00"))
+                        hh = dt_local.hour
                         
-                        coastal_alert = f"Wybrzeże — Nad wodą możliwy wiatr od morza ({time_str}). Sprawdź /now (radar taktyczny)."
-                        alerts.append(coastal_alert)
+                        wdir = float(h.get("wind_dir_deg", 0))
+                        wspd = float(h.get("wind_kmh", 0))
+                        wgst = float(h.get("gust_kmh", h.get("wind_gust_kmh", 0)))
+                        
+                        mode = get_coastal_alert_mode(sig, wspd, wgst, wdir, tz_str, dt_local)
+                        
+                        if mode == "storm":
+                            has_storm = True
+                        elif mode == "beach" and 8 <= hh <= 18:
+                            beach_hours.append(hh)
+                                
+                    except Exception:
+                        pass
+                
+                # Sztorm zgarnia priorytet i idzie na global (alert)
+                if has_storm:
+                    alerts.append("Wybrzeże — Sztormowy wiatr od wody! Trudne warunki na morzu.")
+                # Jeśli nie ma sztormu, sprawdzamy uciążliwy wiatr lifestyle (tylko PL)
+                elif beach_hours:
+                    start_h = min(beach_hours)
+                    end_h = max(beach_hours)
+                    time_str = f"ok. {start_h:02d}:00" if start_h == end_h else f"głównie {start_h:02d}:00–{end_h:02d}:00"
+                    alerts.append(f"Wybrzeże — Nad wodą możliwy wiatr od morza ({time_str}). Sprawdź /now (radar taktyczny).")
+
     except Exception as e:
         print(f"[SYSTEM] Błąd modułu nadmorskiego (prepare_layout): {e}")
 
@@ -1457,75 +1464,59 @@ def prepare_layout_data(payload, now=None):
         if (not final_context_line) or pressure_only:
             final_context_line = (final_context_line + " · " + owm_note) if final_context_line else owm_note
             
-    # ==================================================================
-    # --- TWARDA KOREKTA WIZUALNA (SATELITA ZABIJA KŁAMSTWA MODELI) ---
-    # ==================================================================
-    if owm:
+    # ══════════════════════════════════════════════════════════
+    # TWARDA KOREKTA HERO (SATELITA ZABIJA KŁAMSTWA MODELI NA TERAZ)
+    # ══════════════════════════════════════════════════════════
+    from forecast_text import sky_from_clouds
+    
+    if should_call_owm and 'owm' in locals() and owm:
         current_data = owm.get("data", [{}])[0] if "data" in owm else owm
-        
-        real_clouds = current_data.get("clouds")
-        real_uvi = float(current_data.get("uvi") or 0.0)
-
-        if real_clouds is not None:
-            nowa_baza = None
+        if current_data:
+            real_clouds = float(current_data.get("clouds", 0))
+            real_uvi = float(current_data.get("uvi", 0.0))
             
-            # Określenie bieżącego bloku widocznego na karcie (dynamiczny start)
-            h = now.hour
-            if 6 <= h < 11:
-                blok = f"{h:02d}-10"
-            elif 11 <= h < 17:
-                blok = f"{h:02d}-16"
-            elif 17 <= h < 22:
-                blok = f"{h:02d}-22"
-            else:
-                blok = "noc"
-                
-            # Detektor cienkich chmur i prześwitów słońca
-            if real_clouds >= 85 and real_uvi > 1.2 and not hero_is_night:
-                real_clouds = 65  # Sztucznie zbijamy zachmurzenie do progu "Przejaśnienia"
+            h0 = ta_tuples[0][1] if ta_tuples else {}
+            model_cld = _eff_cld_consensus(h0) if h0 else 0
+            label_model, _ = sky_from_clouds(model_cld, hero_is_night)
             
-            # 1. Modele kłamią, że jest słońce -> Poprawiamy na chmury
-            if "sun" in hero_icon or "clear" in hero_icon:
-                if real_clouds >= 85:
-                    hero_icon = "wk_overcast"
-                    nowa_baza = "Pochmurno"
-                elif real_clouds >= 70:
-                    hero_icon = "wk_mostly_cloudy"
-                    nowa_baza = "Dużo chmur"
+            # --- HIGH-ONLY GATE v2 ---
+            low = float(h0.get("clouds_low_pct") or 0.0)
+            mid = float(h0.get("clouds_mid_pct") or 0.0)
+            lowmid = low + mid
+            prc = float(h0.get("precip_eff_mm", h0.get("precip_mm")) or 0.0)
             
-            # 2. Modele kłamią, że jest pochmurno -> Poprawiamy na słońce/przejaśnienia
-            elif "cloud" in hero_icon or "overcast" in hero_icon:
-                if real_clouds <= 35:
-                    hero_icon = "wk_moon_one_cloud" if hero_is_night else "wk_sun_one_cloud"
-                    nowa_baza = "Pogodnie" if hero_is_night else "Słonecznie"
-                elif real_clouds < 75:
-                    hero_icon = "wk_partlycloudy_night" if hero_is_night else "wk_partlycloudy"
-                    nowa_baza = "Przejaśnienia"
-                elif real_clouds < 85:
-                    hero_icon = "wk_mostly_cloudy"
-                    nowa_baza = "Dużo chmur"
-
-            if nowa_baza:
-                # Inteligentny prefiks zachowujący poprawność gramatyczną
-                if nowa_baza == "Przejaśnienia" and not hero_is_night:
-                    prefix = "Możliwe dziś "
-                else:
-                    prefix = "Obecnie "
+            uv_model = float(h0.get("uv_index") or 0.0)
+            uv_live  = float(real_uvi or 0.0)
+            uv = uv_model if uv_model > 0 else uv_live
+            
+            models_strong_clear = (model_cld <= 40.0)
+            looks_like_high_only = (lowmid <= 20.0) and (prc <= 0.05)
+            owm_claims_cloudy = (real_clouds >= 70.0) and ((real_clouds - model_cld) >= 30.0)
+            
+            high_only_gate = (not hero_is_night) and looks_like_high_only and models_strong_clear
+            
+            if real_clouds >= 85 and uv > 1.2 and not hero_is_night:
+                real_clouds = 65.0
+            
+            if abs(real_clouds - model_cld) >= 25:
+                if high_only_gate and owm_claims_cloudy:
+                    print(f"[OWM-DAY] high-only gate: model={model_cld:.1f} lowmid={lowmid:.1f} owm={real_clouds:.1f} uv={uv:.2f}")
+                    real_clouds = min(real_clouds, 65.0)
                     
-                # Naprawa błędu dublowania godzin (np. 16-16 -> 16:00)
-                if "-" in blok:
-                    b_parts = blok.split("-")
-                    if len(b_parts) == 2 and b_parts[0] == b_parts[1]:
-                        blok = f"{b_parts[0]}:00"
+                # Wykonujemy nadpisanie w Hero tylko jeśli nadal jest spora różnica
+                if abs(real_clouds - model_cld) >= 25:
+                    label_live, icon_live = sky_from_clouds(real_clouds, hero_is_night)
+                    
+                    if label_live != label_model:
+                        hero_icon = icon_live
+                        nowy_napis = f"Obecnie {label_live.lower()} (radar)"
+                        nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
                         
-                nowy_napis = f"{prefix}{nowa_baza.lower()} ({blok})"
-                nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
-                
-                if "\n" in hero_summary_line:
-                    parts = hero_summary_line.split("\n", 1)
-                    hero_summary_line = f"{nowy_napis}\n{parts[1]}"
-                else:
-                    hero_summary_line = nowy_napis
+                        if "\n" in hero_summary_line:
+                            parts = hero_summary_line.split("\n", 1)
+                            hero_summary_line = f"{nowy_napis}\n{parts[1]}"
+                        else:
+                            hero_summary_line = nowy_napis
     # --- AWARYJNY SENSOR MŻAWKI ---
     if not final_context_line:
         hint = _drizzle_hint(ta=ta, hp_all=hours, start_hour=hero_start_hour)

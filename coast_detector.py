@@ -9,6 +9,7 @@ from shapely.strtree import STRtree
 from shapely.ops import transform
 from pyproj import Geod, Transformer
 from time import perf_counter
+from datetime import datetime
 
 WGS84_GEOD = Geod(ellps="WGS84")
 
@@ -300,6 +301,44 @@ def get_or_compute_coast_signature_lazy(
     print(f"[PERF COAST] compute: {t1-t0:.3f}s | store.set: {t2-t1:.3f}s | total: {t2-t0:.3f}s")
     
     return sig
+    
+    
+def get_coastal_alert_mode(sig, wind_spd_kmh: float, gust_kmh: float, wind_dir_deg: float, tz_str: str, current_dt: datetime):
+    """
+    Returns: "storm" | "beach" | None
+    - "storm": globalnie, cały rok
+    - "beach": tylko PL w sezonie 01.06–15.09
+    """
+    if not getattr(sig, "is_coastal", False) or not getattr(sig, "sea_sectors", None):
+        return None
+        
+    if not is_onshore(float(wind_dir_deg), sig.sea_sectors):
+        return None
+        
+    wind_spd = float(wind_spd_kmh or 0.0)
+    gust = float(gust_kmh or wind_spd)
+    
+    # 1) STORM global (Sztorm / bardzo silny wiatr od morza)
+    if wind_spd >= 45.0 or gust >= 70.0:
+        return "storm"
+        
+    # 2) BEACH PL season (Plażowy / lifestyle)
+    tz = (tz_str or "").strip()
+    in_poland = tz in {"Europe/Warsaw", "Poland", "PL"}
+    
+    m = int(current_dt.month)
+    d = int(current_dt.day)
+    in_season = (m in (6, 7, 8)) or (m == 9 and d <= 15)
+    
+    if in_poland and in_season:
+        dist = getattr(sig, "distance_to_ocean_km", None)
+        dist = float(dist) if dist is not None else 999.0
+        add = 8.0 if dist > 10.0 else 0.0
+        
+        if wind_spd >= (18.0 + add) or gust >= (25.0 + add):
+            return "beach"
+            
+    return None
 
 # --- BLOK TESTOWY ---
 if __name__ == "__main__":

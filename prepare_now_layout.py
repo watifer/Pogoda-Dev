@@ -123,17 +123,14 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         should_call_owm = True  # Celowo wymuszamy call dla taktycznego radaru
 
     if should_call_owm:
-        from owm_nowcast import get_current_weather, nowcast_note, apply_cloud_correction
+        from owm_nowcast import get_current_weather, nowcast_note
         
         # Pobieramy PRAWDZIWE dane z satelity na żywo:
         owm = get_current_weather(payload["location"]["lat"], payload["location"]["lon"], timeout_sec=8)
         
         if owm:
-            # 1. NAJPIERW notatka (zanim skasujemy stare dane z modelu!)
+            # Tworzymy tylko notatkę ratunkową, zjawiska pogodowe nadpisze lokalny override
             owm_note = nowcast_note(payload_hours=payload.get("hours", []), now_local=now, owm=owm, lang=lang)
-            
-            # 2. DOPIERO POTEM ratunkowe nadpisanie ikon i chmur w pamięci RAM na 3 godziny
-            apply_cloud_correction(ta_tuples, owm)
 
     # --- CIŚNIENIE I TREND DLA HERO ---
     def _hour(h_dict):
@@ -200,17 +197,35 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         if real_clouds is not None:
             real_clouds = float(real_clouds)
             
-            # Cienkie chmury + UV -> zbijamy procenty
-            if real_clouds >= 85 and real_uvi > 1.2 and not hero_is_night:
-                real_clouds = 65
+            # --- HIGH-ONLY GATE: Ochrona przed cirrusami/smugami ---
+            low = float(h0.get("clouds_low_pct") or 0.0)
+            mid = float(h0.get("clouds_mid_pct") or 0.0)
+            lowmid = low + mid
+            prc = float(h0.get("precip_eff_mm", h0.get("precip_mm")) or 0.0)
+            
+            uv_model = float(h0.get("uv_index") or 0.0)
+            uv_live  = float(real_uvi or 0.0)
+            uv = uv_model if uv_model > 0 else uv_live
+            
+            models_strong_clear = (cld_model <= 40.0)
+            looks_like_high_only = (lowmid <= 20.0) and (prc <= 0.05)
+            owm_claims_cloudy = (real_clouds >= 70.0) and ((real_clouds - cld_model) >= 30.0)
+            
+            high_only_gate = (not hero_is_night) and looks_like_high_only and models_strong_clear
+            
+            if real_clouds >= 85 and uv > 1.2 and not hero_is_night:
+                real_clouds = 65.0
                 
-            # Override tylko gdy różnica jest duża
             if abs(real_clouds - cld_model) >= 25:
-                h0["_cld_override"] = real_clouds
-                cld_now = real_clouds
+                # Bramka z /day - całkowicie ufamy modelom, jeśli to fałszywy satelita
+                if high_only_gate and owm_claims_cloudy:
+                    print(f"[OWM-NOW] high-only gate: model={cld_model:.1f} lowmid={lowmid:.1f} owm={real_clouds:.1f} uv={uv:.2f}")
+                    pass # Zignoruj OWM i zachowaj czyste niebo z modeli
+                else:
+                    h0["_cld_override"] = real_clouds
+                    cld_now = real_clouds
+                    
                 label_live, _ = sky_from_clouds(cld_now, hero_is_night)
-                
-                # Zaznaczamy, jeśli korekta zmieniła tekstową kategorię
                 radar_changed_label = (label_live != label_model)
                 
     # Zapisz flagę do h0, żeby użyć jej później w Hero
@@ -584,48 +599,55 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
     try:
         from coast_runtime import GLOBAL_COAST_STORE, ensure_coast_index
         if GLOBAL_COAST_STORE and ensure_coast_index:
-            from coast_detector import get_or_compute_coast_signature_lazy, is_onshore
+            from coast_detector import get_or_compute_coast_signature_lazy, get_coastal_alert_mode
+            
             loc_lat = payload.get("location", {}).get("lat")
             loc_lon = payload.get("location", {}).get("lon")
+            tz_str = payload.get("location", {}).get("tz", "UTC")
+            
             if loc_lat is not None and loc_lon is not None:
-                
-                # Funkcja sama sprawdzi Cache, a w razie potrzeby pobierze mapę
                 sig = get_or_compute_coast_signature_lazy(
-                    store=GLOBAL_COAST_STORE,
-                    lat=loc_lat,
-                    lon=loc_lon,
-                    idx_factory=ensure_coast_index
+                    store=GLOBAL_COAST_STORE, lat=loc_lat, lon=loc_lon, idx_factory=ensure_coast_index
                 )
+                
+                first_beach = None
+                first_storm = None
+                
+                for idx_h, h in enumerate(ta_now):
+                    wdir = float(h.get("wind_dir_deg", 0))
+                    wspd = float(h.get("wind_kmh", 0))
+                    gust = float(h.get("gust_kmh", h.get("wind_gust_kmh", 0)))
+                    eff_wind = max(wspd, gust)
                     
-                if sig and getattr(sig, "is_coastal", False) and getattr(sig, "sea_sectors", None):
-                    dist = getattr(sig, "distance_to_ocean_km", 999.0) or 999.0
-                    add_thresh = 8.0 if dist > 10.0 else 0.0
-
-                    # Skanujemy całe 12 godzin widocznych na radarze!
-                    onshore_hits = []
-                    for idx_h, h in enumerate(ta_now):
-                        wind_dir = float(h.get("wind_dir_deg", 0))
-                        wind_spd = float(h.get("wind_kmh", 0))
-                        gust = float(h.get("gust_kmh", h.get("wind_gust_kmh", 0)))
-                        eff_wind = max(wind_spd, gust)
+                    dt_local = datetime.fromisoformat(h.get("time_local", "").replace("Z", "+00:00"))
+                    hh = dt_local.hour
+                    
+                    mode = get_coastal_alert_mode(sig, wspd, gust, wdir, tz_str, dt_local)
+                    
+                    if mode == "storm" and not first_storm:
+                        first_storm = (idx_h, hh, wspd, eff_wind)
+                    elif mode == "beach" and (8 <= hh <= 18) and not first_beach:
+                        first_beach = (idx_h, hh, wspd, eff_wind)
                         
-                        if is_onshore(wind_dir, sig.sea_sectors):
-                            if wind_spd >= (18.0 + add_thresh) or eff_wind >= (25.0 + add_thresh):
-                                hh = int(h.get("time_local", "")[11:13])
-                                onshore_hits.append((idx_h, hh, wind_spd, eff_wind))
-                                
-                    if onshore_hits:
-                        first_hit = onshore_hits[0]
-                        idx_h, hh, wind_spd, eff_wind = first_hit
-                        g_txt = f", porywy do {round(eff_wind)} km/h" if eff_wind > wind_spd else ""
+                if first_storm:
+                    idx_h, hh, wind_spd, eff_wind = first_storm
+                    if idx_h == 0:
+                        coastal_note = f"⚠️ Wybrzeże: sztormowy wiatr od wody (do {round(eff_wind)} km/h)!"
+                    elif idx_h <= 2:
+                        coastal_note = f"⚠️ Wybrzeże: w ciągu 1-2h sztorm od strony wody (do {round(eff_wind)} km/h)!"
+                    else:
+                        coastal_note = f"⚠️ Wybrzeże: od ok. {hh:02d}:00 sztormowy wiatr od wody (do {round(eff_wind)} km/h)."
+                
+                elif first_beach:
+                    idx_h, hh, wind_spd, eff_wind = first_beach
+                    g_txt = f", porywy do {round(eff_wind)} km/h" if eff_wind > wind_spd else ""
+                    if idx_h == 0:
+                        coastal_note = f"🌬️ Wybrzeże: wiatr od wody {round(wind_spd)} km/h{g_txt} — na otwartym brzegu mocniej."
+                    elif idx_h <= 2:
+                        coastal_note = f"🌬️ Wybrzeże: w ciągu 1-2h wiatr od wody (do {round(eff_wind)} km/h) — na plaży mocniej."
+                    else:
+                        coastal_note = f"🌬️ Wybrzeże: od ok. {hh:02d}:00 wiatr od wody (do {round(eff_wind)} km/h)."
                         
-                        if idx_h == 0:
-                            coastal_note = f"🌬️ Wybrzeże: wiatr od wody {round(wind_spd)} km/h{g_txt} — na otwartym brzegu mocniej."
-                        elif idx_h <= 2:
-                            coastal_note = f"🌬️ Wybrzeże: w ciągu 1-2h wiatr od wody (do {round(eff_wind)} km/h) — na plaży mocniej."
-                        else:
-                            coastal_note = f"🌬️ Wybrzeże: od ok. {hh:02d}:00 wiatr od wody (do {round(eff_wind)} km/h)."
-                                
     except Exception as e:
         print(f"[SYSTEM] Błąd modułu nadmorskiego w /now: {e}")
     # ==================================================================
