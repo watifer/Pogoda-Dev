@@ -146,7 +146,7 @@ STRINGS = {
     "divergent_models": "Divergent models",
     "diff_day": "day",
     "diff_night": "night",
-    "alt_model": "Alt model:",
+    "alt_model": "Other model:",
     "alert_diag_sender": "Diagnostics",
 
     "alert_diag_event_sat": "Anomaly (Saturday)",
