@@ -146,6 +146,7 @@ STRINGS = {
     "divergent_models": "Divergent models",
     "diff_day": "day",
     "diff_night": "night",
+    "alt_model": "Alt model:",
     "alert_diag_sender": "Diagnostics",
 
     "alert_diag_event_sat": "Anomaly (Saturday)",
@@ -218,6 +219,7 @@ STRINGS = {
     "divergent_models": "Modèles divergents",
     "diff_day": "de jour",
     "diff_night": "de nuit",
+    "alt_model": "Autre modèle :",
     "alert_diag_sender": "Diagnostic",
 
     "alert_diag_event_sat": "Anomalie (samedi)",
@@ -290,6 +292,7 @@ STRINGS = {
     "divergent_models": "Modellabweichung",
     "diff_day": "am Tag",
     "diff_night": "in der Nacht",
+    "alt_model": "Anderes Modell:",
     "alert_diag_sender": "Diagnose",
 
     "alert_diag_event_sat": "Anomalie (Samstag)",
@@ -363,6 +366,7 @@ STRINGS = {
     "divergent_models": "Modelos divergentes",
     "diff_day": "de día",
     "diff_night": "de noche",
+    "alt_model": "Otro modelo:",
     "alert_diag_sender": "Diagnóstico",
 
     "alert_diag_event_sat": "Anomalía (sábado)",
@@ -435,6 +439,7 @@ STRINGS = {
     "divergent_models": "Avvikende modeller",
     "diff_day": "om dagen",
     "diff_night": "om natten",
+    "alt_model": "Annen modell:",
     "alert_diag_sender": "Diagnostikk",
 
     "alert_diag_event_sat": "Anomali (lørdag)",
