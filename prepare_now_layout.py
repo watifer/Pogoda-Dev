@@ -436,11 +436,26 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
                 sky_desc += f"\n{later_str}: {late_name} {prep_from} {dt_late.hour:02d}:00"
                 break
 
-    # Wstawienie tagu (radar), jeśli flaga jest aktywna i nie ma opadów
-    if h0.get("_radar_changed_label") and max_precip_4h == 0:
-        sky_desc_low = sky_desc[:1].lower() + sky_desc[1:] if sky_desc else ""
-        sky_desc = f"Obecnie {sky_desc_low} (radar)"
-        # Podniesienie pierwszej litery całego zdania na wypadek, gdyby coś się nie zgadzało
+    # ==================================================================
+    # ZAKOTWICZENIE CZASOWE DLA HERO W /NOW ("TERAZ" / "OBECNIE")
+    # ==================================================================
+    if sky_desc:
+        # 1. Tłumaczymy czystą bazę (np. "Bezchmurnie, pogoda jak kryształ"),
+        # aby słownik EXACT_MAPS mógł to idealnie dopasować!
+        if lang != "pl":
+            sky_desc = translate_weather_text(sky_desc, lang)
+            
+        sky_desc_low = sky_desc[:1].lower() + sky_desc[1:]
+        
+        # 2. Dodajemy przedrostki z uwzględnieniem wybranego języka
+        if h0.get("_radar_changed_label") and max_precip_4h == 0:
+            obecnie = {"en": "Currently", "de": "Aktuell", "fr": "Actuellement", "es": "Actualmente", "no": "For øyeblikket", "nb": "For øyeblikket"}.get(lang, "Obecnie")
+            sky_desc = f"{obecnie} {sky_desc_low} (radar)"
+        else:
+            teraz = {"en": "Now", "de": "Jetzt", "fr": "Maintenant", "es": "Ahora", "no": "Nå", "nb": "Nå"}.get(lang, "Teraz")
+            sky_desc = f"{teraz} {sky_desc_low}"
+            
+        # 3. Podniesienie pierwszej litery całego zdania
         sky_desc = sky_desc[:1].upper() + sky_desc[1:]
 
     # Bezpieczne klejenie drugiej linii Hero (Wiatr + Ciśnienie)
@@ -652,8 +667,67 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         print(f"[SYSTEM] Błąd modułu nadmorskiego w /now: {e}")
     # ==================================================================
 
-    # 3. Kaskada priorytetów (Wiatr taktyczny przed informacją o satelicie!)
-    context_line = now_context_line or coastal_note or owm_note or hint
+    # ==================================================================
+    # RADAR GOŁOLEDZI (/now) - ze stałymi i ciągłością czasu
+    # ==================================================================
+    FREEZING_MM_MIN = 0.05
+    FREEZING_TEMP_C = 0.8
+    FREEZING_RH_MIN = 88
+    FREEZING_DP_MAX = 1.0
+
+    def _freezing_risk_now(h_dict):
+        t_val = float(h_dict.get("temp_c") if h_dict.get("temp_c") is not None else 99)
+        rh = float(h_dict.get("rh_pct") or 0)
+        dp = h_dict.get("dewpoint_c")
+        dp = float(dp) if dp is not None else None
+        mm = float(h_dict.get("precip_eff_mm", h_dict.get("precip_mm")) or 0.0)
+        
+        if mm <= FREEZING_MM_MIN: return False
+        kind_val = classify_precip(
+            mm, t_val,
+            symbol_code=h_dict.get("symbol_code_eff", h_dict.get("symbol_code")),
+            weather_code=h_dict.get("weather_code_eff", h_dict.get("weather_code"))
+        )
+        if kind_val in {"freezing_drizzle", "freezing_rain"}: return True
+        fam = KINDS.get(kind_val, {}).get("family")
+        if fam == "rain" and t_val <= FREEZING_TEMP_C:
+            if (dp is not None and dp <= FREEZING_DP_MAX) or (rh >= FREEZING_RH_MIN): return True
+        return False
+
+    risk_dts_now = []
+    for dt_val, h_dict in ta_tuples:
+        if _freezing_risk_now(h_dict):
+            risk_dts_now.append(dt_val)
+
+    freezing_note = None
+    if risk_dts_now:
+        def fmt_rng(a, b):
+            end = b + timedelta(hours=1)
+            end_h = end.hour
+            # Zmiana z 00 na 24, gdy to równo północ następnego dnia
+            if end_h == 0 and end.date() != a.date():
+                end_h = 24
+            # Produktowy dopisek: jeśli początek ryzyka to jutro, poinformuj o tym
+            prefix = f"{t(lang, 'tomorrow').lower()} " if a.date() > now.date() else ""
+            return f"{prefix}{a.hour:02d}–{end_h:02d}"
+
+        def group_hourly_datetimes(dts):
+            dts = sorted(list(set(dts))) # set zabezpiecza w razie dubli
+            rngs, st, pv = [], dts[0], dts[0]
+            for dt in dts[1:]:
+                # Używamy bezpiecznego przedziału dla ciągłości 1 godziny
+                diff = (dt - pv).total_seconds()
+                if 3500 <= diff <= 3700: pv = dt
+                else: rngs.append((st, pv)); st = dt; pv = dt
+            rngs.append((st, pv))
+            return rngs
+            
+        rng = group_hourly_datetimes(risk_dts_now)
+        when = ", ".join(fmt_rng(a, b) for a, b in rng[:2])
+        freezing_note = f"⚠️ Uwaga: ryzyko gołoledzi i marznących opadów ({when})."
+
+    # 3. Kaskada priorytetów (Gołoledź najwyżej!)
+    context_line = freezing_note or now_context_line or coastal_note or owm_note or hint
     
     
     # ══════════════════════════════════════════════════════════

@@ -16,7 +16,7 @@ try:
 except ImportError:
     from backports.zoneinfo import ZoneInfo
 
-from forecast_text import WxEvent, BlockForecast, build_block_copy, classify_precip, sky_from_clouds, SKY_RANK
+from forecast_text import WxEvent, BlockForecast, build_block_copy, classify_precip, sky_from_clouds, SKY_RANK, KINDS
 from worth_knowing import build_worth_knowing
 from confidence_gate import compute_trust_report
 from ui_softening import strip_mm_pct_parens, soften_possible_prefix
@@ -342,6 +342,21 @@ def _select_block_hours(hp: list, date_str: str, next_date_str: str,
     ]
 
 
+DRIZZLE_MAX_MM = 0.5
+
+def _coerce_drizzle(kind: str | None, mm: float) -> str | None:
+    if not kind or mm is None:
+        return kind
+    try:
+        mm = float(mm)
+    except Exception:
+        return kind
+    
+    fam = KINDS.get(kind, {}).get("family")
+    if fam == "rain" and 0 < mm <= DRIZZLE_MAX_MM:
+        return "drizzle"
+    return kind
+
 def _build_wx_events(block_hours: list, hp_all: list = None) -> list:
     events = []
     for h in block_hours:
@@ -353,6 +368,10 @@ def _build_wx_events(block_hours: list, hp_all: list = None) -> list:
             symbol_code=h.get("symbol_code_eff", h.get("symbol_code")),
             weather_code=h.get("weather_code_eff", h.get("weather_code"))
         )
+        
+        # ZGODNOŚĆ Z /NOW: wymuszamy mżawkę dla drobnych opadów
+        kind = _coerce_drizzle(kind, mm)
+        
         if kind:
             events.append(WxEvent(kind, hr, hr + 1))
     return events
@@ -569,20 +588,22 @@ def _build_day_summary(hp: list, date_str: str, is_night_mode: bool = False) -> 
             
             if precip > 0:
                 kind = classify_precip(precip, temp_opadu, symbol_code=code, weather_code=w_code)
+                kind = _coerce_drizzle(kind, precip)
                 
-                if kind in ["snow", "light_snow", "heavy_snow", "snow_showers"]:
-                    is_snow = True
-                elif kind == "sleet":
-                    is_snow = True
+                fam = KINDS.get(kind, {}).get("family")
+                if fam == "rain":
                     is_rain = True
-                elif kind in ["storm", "heavy_storm"]:
-                    is_storm = True
-                elif kind:
-                    is_rain = True
-                    if kind == "drizzle":
+                    if kind == "drizzle": 
                         has_drizzle = True
-                    else:
+                    else: 
                         has_real_rain = True
+                elif fam == "snow":
+                    is_snow = True
+                elif fam == "mixed":
+                    is_snow = True
+                    is_rain = True
+                elif fam == "storm":
+                    is_storm = True
 
                 if is_snow:
                     snow_hours.append(hour)
@@ -657,6 +678,23 @@ def _build_day_summary(hp: list, date_str: str, is_night_mode: bool = False) -> 
     descriptor = ""
     icon = "wk_clear"
 
+    # --- Anti-drizzle domination (ikona dnia) ---
+    drizzle_minor = False
+    if has_rain and has_drizzle and not has_real_rain:
+        drizzle_hours = sorted(set(rain_hours))
+        total_mm = 0.0
+        max_mm = 0.0
+        for h in dh:
+            hh = _hour_safe(h.get("time_local", ""))
+            if hh in drizzle_hours:
+                mm = float(h.get("precip_eff_mm", h.get("precip_mm")) or 0.0)
+                total_mm += mm
+                if mm > max_mm: max_mm = mm
+                
+        # "krótko i słabo" => mżawka nie zmienia ikony całego dnia
+        if len(drizzle_hours) < 2 and total_mm < 1.0 and max_mm < 0.7:
+            drizzle_minor = True
+
     if temp_anomaly:
         descriptor = f"W dzień tylko {max_dzien}°C"
         icon = "wk_overcast" if has_heavy_clouds else "wk_partlycloudy"
@@ -693,7 +731,7 @@ def _build_day_summary(hp: list, date_str: str, is_night_mode: bool = False) -> 
                 icon = "wk_snow" if has_snow_m and has_snow_a else "wk_light_snow"
                 
     elif has_rain:
-        is_drizzle = has_drizzle 
+        is_drizzle = has_drizzle and not has_real_rain 
         
         if has_fog:
             if has_sun:
@@ -716,6 +754,11 @@ def _build_day_summary(hp: list, date_str: str, is_night_mode: bool = False) -> 
                     descriptor = "Deszcz" if has_rain_m and has_rain_a else ("Rano deszcz" if has_rain_m else "Po południu deszcz")
                     icon = "wk_rain" if has_rain_m and has_rain_a else "wk_showers"
                     
+        # --- Zastosowanie override dla "minor drizzle" ---
+        if is_drizzle and drizzle_minor:
+            # Zostawiamy descriptor z informacją o mżawce, ale ikonę bierzemy z dominującego nieba
+            _, icon = sky_from_clouds(median_cld, is_night_mode)
+            
     elif has_fog and not has_heavy_clouds:
         if SKY_RANK.get(dominant_sky_pl, 0) <= 1: # Bezchmurnie, Słonecznie, Pogodnie
             descriptor = "Rano mgły, w dzień słońce"
@@ -960,6 +1003,70 @@ def prepare_layout_data(payload, now=None):
         caqi = ar["caqi"]
         if caqi > 75:
             alerts.append("Zła jakość powietrza — normy zanieczyszczeń są przekroczone")
+
+    # === DETEKTOR GOŁOLEDZI I MARZNĄCYCH OPADÓW (24h) ===
+    FREEZING_MM_MIN = 0.05
+    FREEZING_TEMP_C = 0.8
+    FREEZING_RH_MIN = 88
+    FREEZING_DP_MAX = 1.0
+
+    def _freezing_risk(h_dict):
+        t_val = float(h_dict.get("temp_c") if h_dict.get("temp_c") is not None else 99)
+        rh = float(h_dict.get("rh_pct") or 0)
+        dp = h_dict.get("dewpoint_c")
+        dp = float(dp) if dp is not None else None
+        mm = float(h_dict.get("precip_eff_mm", h_dict.get("precip_mm")) or 0.0)
+        
+        if mm <= FREEZING_MM_MIN: return False
+        kind_val = classify_precip(
+            mm, t_val,
+            symbol_code=h_dict.get("symbol_code_eff", h_dict.get("symbol_code")),
+            weather_code=h_dict.get("weather_code_eff", h_dict.get("weather_code"))
+        )
+        if kind_val in {"freezing_drizzle", "freezing_rain"}: return True
+        fam = KINDS.get(kind_val, {}).get("family")
+        if fam == "rain" and t_val <= FREEZING_TEMP_C:
+            if (dp is not None and dp <= FREEZING_DP_MAX) or (rh >= FREEZING_RH_MIN): return True
+        return False
+
+    all_hours = payload.get("hours", [])
+    scan_limit = now + timedelta(hours=24)
+    risk_dts = []
+
+    for h in all_hours:
+        try:
+            dt_val = datetime.fromisoformat(h["time_local"].replace("Z", "+00:00")).astimezone(tz)
+        except Exception:
+            continue
+        if now <= dt_val <= scan_limit:
+            # Prawidłowy skan oparty na wszystkich modelach z payloadu
+            if _freezing_risk(h):
+                risk_dts.append(dt_val)
+
+    if risk_dts:
+        def fmt_rng(a, b):
+            end = b + timedelta(hours=1)
+            end_h = end.hour
+            # Zmiana z 00 na 24, gdy to równo północ następnego dnia
+            if end_h == 0 and end.date() != a.date():
+                end_h = 24
+            prefix = "jutro " if a.date() > now.date() else ""
+            return f"{prefix}{a.hour:02d}–{end_h:02d}"
+
+        def group_hourly_datetimes(dts):
+            dts = sorted(list(set(dts))) # deduplikacja z dwóch modeli
+            rngs, st, pv = [], dts[0], dts[0]
+            for dt in dts[1:]:
+                diff = (dt - pv).total_seconds()
+                if 3500 <= diff <= 3700: pv = dt
+                else: rngs.append((st, pv)); st = dt; pv = dt
+            rngs.append((st, pv))
+            return rngs
+            
+        rng = group_hourly_datetimes(risk_dts)
+        when = ", ".join(fmt_rng(a, b) for a, b in rng[:2])
+        alert_msg = t(lang, "freezing_alert") if t(lang, "freezing_alert") != "freezing_alert" else "⚠️ Marznące opady: ryzyko gołoledzi"
+        alerts.insert(0, f"{alert_msg} ({when}).")
 
     section_title, block_defs = _get_time_blocks(now.hour)
     section_title = t(lang, {

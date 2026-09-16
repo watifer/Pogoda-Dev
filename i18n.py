@@ -488,6 +488,9 @@ EXACT_MAPS = {
     "en": {
         
         "bezchmurnie, pogoda jak kryształ": "Clear sky, crystal perfect",
+        "⚠️ marznące opady: ryzyko gołoledzi": "⚠️ Freezing precipitation: risk of black ice",
+        "⚠️ uwaga: ryzyko gołoledzi i marznących opadów": "⚠️ Warning: risk of black ice and freezing precipitation",
+        "jutro": "tomorrow",
         "bezchmurnie": "Clear sky",
         "słonecznie": "Sunny",
         "pogodnie": "Sunny",
@@ -552,6 +555,9 @@ EXACT_MAPS = {
     "fr": {
                 
         "bezchmurnie, pogoda jak kryształ": "Ciel dégagé, temps cristallin",
+        "⚠️ marznące opady: ryzyko gołoledzi": "⚠️ Précipitations verglaçantes : risque de verglas",
+        "⚠️ uwaga: ryzyko gołoledzi i marznących opadów": "⚠️ Attention : risque de verglas et de précipitations verglaçantes",
+        "jutro": "demain",
         "bezchmurnie": "Ciel dégagé",
         "słonecznie": "Ensoleillé",
         "pogodnie": "Ensoleillé",
@@ -615,6 +621,9 @@ EXACT_MAPS = {
     },
     "de": {
         "bezchmurnie, pogoda jak kryształ": "Klarer Himmel, kristallklares Wetter",
+        "⚠️ marznące opady: ryzyko gołoledzi": "⚠️ Gefrierender Niederschlag: Glatteisgefahr",
+        "⚠️ uwaga: ryzyko gołoledzi i marznących opadów": "⚠️ Warnung: Glatteisgefahr und gefrierender Niederschlag",
+        "jutro": "morgen",
         "bezchmurnie": "Klarer Himmel",
         "słonecznie": "Sonnig",
         "pogodnie": "Heiter",
@@ -678,6 +687,9 @@ EXACT_MAPS = {
     },
     "es": {
         "bezchmurnie, pogoda jak kryształ": "Cielo despejado, clima cristalino",
+        "⚠️ marznące opady: ryzyko gołoledzi": "⚠️ Precipitaciones heladas: riesgo de hielo en la vía",
+        "⚠️ uwaga: ryzyko gołoledzi i marznących opadów": "⚠️ Atención: riesgo de hielo y precipitaciones heladas",
+        "jutro": "mañana",
         "bezchmurnie": "Cielo despejado",
         "słonecznie": "Soleado",
         "pogodnie": "Soleado",
@@ -741,6 +753,9 @@ EXACT_MAPS = {
     },
     "no": {
         "bezchmurnie, pogoda jak kryształ": "Klar himmel, krystallklart vær",
+        "⚠️ marznące opady: ryzyko gołoledzi": "⚠️ Underkjølt nedbør: fare for glatt føre",
+        "⚠️ uwaga: ryzyko gołoledzi i marznących opadów": "⚠️ Advarsel: fare for glatt føre og underkjølt nedbør",
+        "jutro": "i morgen",
         "bezchmurnie": "Klar himmel",
         "słonecznie": "Solrik",
         "pogodnie": "Solrik",
