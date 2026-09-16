@@ -344,7 +344,9 @@ def _select_block_hours(hp: list, date_str: str, next_date_str: str,
 
 DRIZZLE_MAX_MM = 0.5
 
-def _coerce_drizzle(kind: str | None, mm: float) -> str | None:
+from typing import Optional
+
+def _coerce_drizzle(kind: Optional[str], mm: float) -> Optional[str]:
     if not kind or mm is None:
         return kind
     try:
