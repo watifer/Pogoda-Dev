@@ -1584,7 +1584,9 @@ def prepare_layout_data(payload, now=None):
             real_clouds = float(current_data.get("clouds", 0))
             real_uvi = float(current_data.get("uvi", 0.0))
             
-            h0 = ta_tuples[0][1] if ta_tuples else {}
+            # ZMIANA: Pobieramy h0 bezpośrednio z listy ta (dzisiejszych godzin)
+            h0 = ta[0] if ta else {}
+            
             model_cld = _eff_cld_consensus(h0) if h0 else 0
             label_model, _ = sky_from_clouds(model_cld, hero_is_night)
             
