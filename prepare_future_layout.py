@@ -24,45 +24,36 @@ def prepare_future_layout_data(payload, now=None):
     raw_lang = str(payload.get("lang", "pl")).strip().lower()
     lang = raw_lang[:2]
     
-    # 1. NAJPIERW definiujemy listy (skąd bierzemy dane)
-    hours = payload.get("hours", [])
-    hy = [h for h in hours if h.get("source") == "yrno"]
-    ho = [h for h in hours if h.get("source") == "openmeteo"]
+    from daily_source import pick_hours_for_daily_summary
 
-    # 2. DOPIERO TERAZ nasza Magia (Przeszczep procentów z OM do Yr.no)
-    om_dict = {h.get("time_local"): h for h in ho if "time_local" in h}
+    # 1. NAJPIERW definiujemy listy (bezpieczna kopia, żeby nie mutować payloadu!)
+    raw_hours = payload.get("hours", [])
+    safe_hours = [h.copy() for h in raw_hours]
     
+    hy = [h for h in safe_hours if h.get("source") == "yrno"]
+    ho = [h for h in safe_hours if h.get("source") == "openmeteo"]
+
+    # 2. DOPIERO TERAZ nasza Magia (Przeszczep procentów z OM do Yr.no na kopii)
+    om_dict = {h.get("time_local"): h for h in ho if "time_local" in h}
     for y_hour in hy:
         time_key = y_hour.get("time_local")
         if time_key and time_key in om_dict:
-            o_hour = om_dict[time_key]
-            pop = o_hour.get("precip_prob_pct")
+            pop = om_dict[time_key].get("precip_prob_pct")
             if pop is not None:
                 y_hour["precip_prob_pct"] = pop
 
     future_days = []
     all_temps = []
+    daily_diag_dict = payload.get("daily_diag", {})
 
     for off in range(1, 16):
         tgt = now + timedelta(days=off)
         ts = tgt.strftime("%Y-%m-%d")
 
-        # Pobieramy diagnostykę jeszcze przed zbudowaniem dnia
-        diag = payload.get("daily_diag", {}).get(ts, {})
-        n_yr = diag.get("n_yr", 0)
-
-        summary = None
-        source_marker = ""
-        
-        # Żądamy minimum 3 próbek od Yr.no, aby uznać jego prognozę za ważną
-        if n_yr >= 3:
-            summary = _build_day_summary(hy, ts)
-            
-        # Jeśli próbek jest za mało (lub brak), w całości polegamy na Open-Meteo
-        if not summary:
-            summary = _build_day_summary(ho, ts)
-            source_marker = " *"
-
+        # 3. Zcentralizowany wybór źródła
+        pick = pick_hours_for_daily_summary(safe_hours, daily_diag_dict, ts)
+        summary = _build_day_summary(pick.hp, ts)
+        source_marker = pick.marker
         if summary:
             import os
             ENABLE_VOLATILITY_UI = os.getenv("ENABLE_VOLATILITY_UI", "1") == "1"

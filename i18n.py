@@ -867,6 +867,7 @@ REPLACEMENTS = {
         ("ulewny deszcz", "heavy rain"),
         ("możliwe dziś ", "possible today "),
         ("obecnie ", "currently "),
+        ("(satelita)", "(satellite)"),
         
         # --- ALERTY Z WEATHER_PAYLOAD ---
         ("prognozowane są niszczące porywy do", "destructive gusts forecast up to"),
@@ -1245,6 +1246,7 @@ REPLACEMENTS = {
         (" — na otwartym brzegu mocniej.", " — plus fort sur la côte ouverte."),
         (" km/h) — na plaży mocniej.", " km/h) — plus fort sur la plage."),
         ("Wybrzeże", "Côte"),
+        ("(satelita)", "(satellite)"),
          
     ],
     "de": [
@@ -1443,6 +1445,7 @@ REPLACEMENTS = {
         (" — na otwartym brzegu mocniej.", " — stronger on the open shore."),
         (" km/h) — na plaży mocniej.", " km/h) — stronger on the beach."),
         ("Wybrzeże", "Küste"),
+        ("(satelita)", "(Satellit)"),
         
     
     ],
@@ -1644,6 +1647,7 @@ REPLACEMENTS = {
         (" — na otwartym brzegu mocniej.", " — más fuerte en la costa abierta."),
         (" km/h) — na plaży mocniej.", " km/h) — más fuerte en la playa."),
         ("Wybrzeże", "Costa"),
+        ("(satelita)", "(satélite)"),
         
         ],
     "no": [
@@ -1845,6 +1849,7 @@ REPLACEMENTS = {
         (" — na otwartym brzegu mocniej.", " — sterkere på åpen kyst."),
         (" km/h) — na plaży mocniej.", " km/h) — sterkere på stranden."),
         ("Wybrzeże", "Kyst"),
+        ("(satelita)", "(satellitt)"),
         
     ]
 }

@@ -1154,14 +1154,17 @@ def prepare_layout_data(payload, now=None):
         summary_offsets = [1, 2]    
         show_teaser = True
 
+    from daily_source import pick_hours_for_daily_summary
+    daily_diag_dict = payload.get("daily_diag", {})
+
     future_sections = []
     for off in summary_offsets:
         tgt = now + timedelta(days=off)
         ts  = tgt.strftime("%Y-%m-%d")
         
-        base = _build_day_summary(hy, ts, is_night_mode=False) if hy else None
-        if not base:
-            base = _build_day_summary(hp, ts, is_night_mode=False)
+        # Zcentralizowany wybór źródła dla trendu (np. na poniedziałek, wtorek...)
+        pick = pick_hours_for_daily_summary(hours, daily_diag_dict, ts)
+        base = _build_day_summary(pick.hp, ts, is_night_mode=False)
             
         haz = _build_day_summary(ho, ts, is_night_mode=False) if ho else None
         
@@ -1495,17 +1498,15 @@ def prepare_layout_data(payload, now=None):
         sat_str = sat.strftime("%Y-%m-%d")
         sun_str = sun.strftime("%Y-%m-%d")
         
-        daily_diag = payload.get("daily_diag", {})
-        n_yr_sat = daily_diag.get(sat_str, {}).get("n_yr", 0)
-        n_yr_sun = daily_diag.get(sun_str, {}).get("n_yr", 0)
+        daily_diag_dict = payload.get("daily_diag", {})
 
-        sat_h = [h for h in (hy if n_yr_sat >= 3 else ho) if h.get("time_local", "").startswith(sat_str)]
-        sun_h = [h for h in (hy if n_yr_sun >= 3 else ho) if h.get("time_local", "").startswith(sun_str)]
-        
+        pick_sat = pick_hours_for_daily_summary(hours, daily_diag_dict, sat_str)
+        pick_sun = pick_hours_for_daily_summary(hours, daily_diag_dict, sun_str)
+
         lang_days = DAYS_SHORT.get(lang, DAYS_SHORT["en"])
         
-        sat_t   = _build_weekend_day_teaser(sat_h, lang_days[5], payload=payload)  
-        sun_t   = _build_weekend_day_teaser(sun_h, lang_days[6], payload=payload)  
+        sat_t   = _build_weekend_day_teaser(pick_sat.hp, lang_days[5], payload=payload)  
+        sun_t   = _build_weekend_day_teaser(pick_sun.hp, lang_days[6], payload=payload) 
         
         if sat_t and sun_t:
             weekend_teaser = {"sat": sat_t, "sun": sun_t, "title": t(lang, "next_weekend")}
@@ -1584,8 +1585,8 @@ def prepare_layout_data(payload, now=None):
             real_clouds = float(current_data.get("clouds", 0))
             real_uvi = float(current_data.get("uvi", 0.0))
             
-            # ZMIANA: Pobieramy h0 bezpośrednio z listy ta (dzisiejszych godzin)
-            h0 = ta[0] if ta else {}
+            # Pobieramy godzinę zgodną z 'now.hour', a jeśli zniknęła - bierzemy pierwszą dostępną
+            h0 = next((h for h in ta if _hour_safe(h.get("time_local", "")) == now.hour), None) or (ta[0] if ta else {})
             
             model_cld = _eff_cld_consensus(h0) if h0 else 0
             label_model, _ = sky_from_clouds(model_cld, hero_is_night)
@@ -1619,8 +1620,15 @@ def prepare_layout_data(payload, now=None):
                     label_live, icon_live = sky_from_clouds(real_clouds, hero_is_night)
                     
                     if label_live != label_model:
-                        hero_icon = icon_live
-                        nowy_napis = f"Obecnie {label_live.lower()} (radar)"
+                        # Ochrona planu dnia: nie ruszamy ikony, jeśli prognozowany jest deszcz/śnieg lub silny wiatr
+                        has_precip = bool(day_hero and day_hero.get("precip_badge"))
+                        has_wind = ((max_gust or 0) >= 60) or (max_wind >= 45)
+                        
+                        if not has_precip and not has_wind:
+                            hero_icon = icon_live
+                            
+                        # Zmiana tekstu ("Obecnie...") następuje zawsze dla lepszego kontekstu
+                        nowy_napis = f"Obecnie {label_live.lower()} (satelita)"
                         nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
                         
                         if "\n" in hero_summary_line:
