@@ -450,7 +450,7 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         # 2. Dodajemy przedrostki z uwzględnieniem wybranego języka
         if h0.get("_radar_changed_label") and max_precip_4h == 0:
             obecnie = {"en": "Currently", "de": "Aktuell", "fr": "Actuellement", "es": "Actualmente", "no": "For øyeblikket", "nb": "For øyeblikket"}.get(lang, "Obecnie")
-            sky_desc = f"{obecnie} {sky_desc_low} (radar)"
+            sky_desc = f"{obecnie} {sky_desc_low} (satelita)"
         else:
             teraz = {"en": "Now", "de": "Jetzt", "fr": "Maintenant", "es": "Ahora", "no": "Nå", "nb": "Nå"}.get(lang, "Teraz")
             sky_desc = f"{teraz} {sky_desc_low}"
