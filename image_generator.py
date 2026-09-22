@@ -171,15 +171,18 @@ def measure_spans(draw, spans, font):
     return sum(draw.textlength(s.get("text") or "", font=font) for s in spans)
 
 def ellipsize(draw, text, font, max_px):
-    """Przycina tekst i dodaje '...', jeśli przekracza dozwoloną szerokość."""
-    if draw.textlength(text, font=font) <= max_px:
+    """Przycina tekst i dodaje '...', używając bezpiecznego textbbox."""
+    if not text:
         return text
+    if draw.textbbox((0, 0), text, font=font)[2] <= max_px:
+        return text
+        
     ell = "…"
     lo, hi = 0, len(text)
     while lo < hi:
         mid = (lo + hi) // 2
         cand = text[:mid].rstrip() + ell
-        if draw.textlength(cand, font=font) <= max_px:
+        if draw.textbbox((0, 0), cand, font=font)[2] <= max_px:
             lo = mid + 1
         else:
             hi = mid
@@ -296,6 +299,7 @@ def draw_blocks_card(draw, ov, img, blocks, title, y, cx1, cx2, pal,
     f_label = get_font("Inter-Medium.ttf", 34)
     f_temp  = get_font("Inter-Medium.ttf", 34)
     f_line  = get_font("Inter-Regular.ttf", 30)
+    f_diag  = get_font("Inter-Medium.ttf", 26)
     CP = 20; CR = 24; ROW = 54; EXTRA_H = 32; TITLE_GAP = 62
 
     # Kolumny dosunięte do lewej dla ikony 36px
@@ -485,26 +489,47 @@ def draw_days_card(draw, ov, img, days, title, y, cx1, cx2, pal,
         # Kolumna 4: badge LUB descriptor
         badge = d.get("precip_badge")
         descriptor = d.get("descriptor")
+        severity = d.get("severity", "normal")
         
-            
         desc_avail = cx2 - CP - C_DESC
+
+        # --- ODCZYT I BEZPIECZNE FORMATOWANIE DIAG_TAG ---
+        diag_tag = d.get("diag_tag")
+        diag_w = 0
+        if diag_tag:
+            # 1. Zabezpieczenie szerokości dla tagu (zmienione z 45% na bezpieczne 35%)
+            max_diag_avail = int((cx2 - CP - C_DESC) * 0.35)
+            
+            # Używamy ellipsize (z textbbox)
+            diag_tag = ellipsize(draw, diag_tag, f_diag, max_diag_avail)
+            
+            # 2. Bezpieczne mierzenie przez textbbox
+            bbox = draw.textbbox((0, 0), diag_tag, font=f_diag)
+            diag_w = bbox[2] - bbox[0]
+            
+            # 3. Odcięcie przestrzeni z clampem
+            desc_avail = max(10, desc_avail - (diag_w + 20))
+
+        # --- KOLOROWANIE OPISU POGODY (Semantyczne) ---
+        if severity == "alert": warn_color = (252, 129, 129)
+        elif severity == "caution": warn_color = (253, 186, 116)
+        else: warn_color = (200, 210, 225)
 
         if badge:
             badge = fit_day_desc(draw, badge, f_line, desc_avail)
-            
-            # --- INTELIGENTNE KOLOROWANIE ---
-            b_low = badge.lower()
-            # Pomarańczowy rezerwujemy TYLKO dla groźnych zjawisk
-            if any(w in b_low for w in ["burz", "wiatr", "wichur", "grad"]):
-                b_color = (253, 186, 116)
-            else:
-                b_color = (200, 210, 225) # Zwykły deszcz/śnieg dostaje jednolity, błękitno-biały kolor
-                
-            draw.text((C_DESC, dy + 1), badge, font=f_line, fill=b_color)
+            draw.text((C_DESC, dy + 1), badge, font=f_line, fill=warn_color)
             
         elif descriptor:
             descriptor = fit_day_desc(draw, descriptor, f_line, desc_avail)
-            draw.text((C_DESC, dy + 1), descriptor, font=f_line, fill=(200, 210, 225))
+            draw.text((C_DESC, dy + 1), descriptor, font=f_line, fill=warn_color)
+
+        # --- RYSOWANIE DIAG_TAG ---
+        if diag_tag:
+            diag_sev = d.get("diag_severity", "normal")
+            diag_color = (253, 186, 116) if diag_sev in ("caution", "alert") else (200, 210, 225)
+            
+            # cx2 to krawędź obrazu, CP to margines. Renderujemy tekst od tyłu.
+            draw.text((cx2 - CP - diag_w, dy + 5), diag_tag, font=f_diag, fill=diag_color)
         
         
         dy += ROW

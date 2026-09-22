@@ -62,7 +62,7 @@ def prepare_future_layout_data(payload, now=None):
             if ENABLE_VOLATILITY_UI and diag.get("is_volatile"):
                 if diag.get("n_om", 0) >= 6 and diag.get("n_yr", 0) >= 3:
                     
-                    # Sprawdzamy czy dzień jest spokojny (brak ekstremów opadowych/wiatrowych)
+                    # Sprawdzamy czy dzień jest spokojny
                     icon_name = summary.get("icon", "")
                     has_bad_weather = bool(summary.get("precip_badge")) or any(x in icon_name for x in ["rain", "storm", "snow", "sleet", "showers", "wind"])
                     
@@ -72,27 +72,36 @@ def prepare_future_layout_data(payload, now=None):
                         
                         if max_diff >= min_diff:
                             alt_temp = diag.get("max_yr") if pick.source == "openmeteo" else diag.get("max_om")
-                            pora_text = t(lang, "diff_day")
+                            pora_full = t(lang, "diff_day")
                             base_val = summary.get("temp_max")
                         else:
                             alt_temp = diag.get("min_yr") if pick.source == "openmeteo" else diag.get("min_om")
-                            pora_text = t(lang, "diff_night")
+                            pora_full = t(lang, "diff_night")
                             base_val = summary.get("temp_min")
                             
                         if alt_temp is not None and base_val is not None:
                             alt_val = int(round(float(alt_temp)))
                             
-                            # TWARDY WARUNK +/-: Różnica musi wynosić co najmniej 2 stopnie
+                            # TWARDY WARUNEK: Rozbieżność musi wynosić min. 2 stopnie
                             if abs(alt_val - int(base_val)) >= 2:
-                                warn_text = t(lang, "alt_model")
-                                alert_str = f"⚠️ {warn_text}: {alt_val}°C {pora_text}"
                                 
-                                # Doklejamy do opisu bez niszczenia stanu pogody
-                                if summary.get("descriptor"):
-                                    summary["descriptor"] = f"{summary['descriptor']} · {alert_str}"
+                                # --- POBIERANIE Z FALLBACKAMI ---
+                                warn_word = t(lang, "possible_alert")
+                                if warn_word == "possible_alert":
+                                    warn_word = "Possible" if lang == "en" else "Możliwe"
+                                    
+                                if max_diff >= min_diff:
+                                    pora_short = t(lang, "diff_day_short")
+                                    if pora_short == "diff_day_short":
+                                        pora_short = "day" if lang == "en" else "dzień"
                                 else:
-                                    summary["descriptor"] = alert_str
-            # --------------------------------------------------------------
+                                    pora_short = t(lang, "diff_night_short")
+                                    if pora_short == "diff_night_short":
+                                        pora_short = "night" if lang == "en" else "noc"
+
+                                # TWORZYMY ZUPEŁNIE NOWE POLE SEMANTYCZNE (krótki, zwarty tekst)
+                                summary["diag_tag"] = f"⚠️ {warn_word}: {alt_val}° {pora_short}"
+                                summary["diag_severity"] = "caution"
 
             short_day_name = DAYS_SHORT.get(lang, DAYS_SHORT["pl"])[tgt.weekday()]
             future_days.append({

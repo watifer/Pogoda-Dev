@@ -822,9 +822,19 @@ def _build_day_summary(hp: list, date_str: str, is_night_mode: bool = False) -> 
     if badge: badge = _format_single_hours(_ensure_kmh(badge))
     if descriptor: descriptor = _format_single_hours(_ensure_kmh(descriptor))
 
+    # --- SEMANTYKA ZAGROŻEŃ (Wielopoziomowa, niezależna od języka) ---
+    if has_storm or max_wind >= 80:
+        severity = "alert"
+    elif max_wind >= 60:
+        severity = "caution"
+    # Tutaj w przyszłości można dodać: elif has_freezing_rain: severity = "alert" itp.
+    else:
+        severity = "normal"
+
     return {
         "icon": icon, "temp_min": d_min, "temp_max": d_max,
         "precip_badge": badge, "descriptor": descriptor,
+        "severity": severity
     }
 
 # ═══════════════════════════════════════
@@ -852,7 +862,8 @@ def _build_weekend_day_teaser(hp: list, day_short: str, payload: dict = None) ->
         "icon": summary["icon"],
         "temp_min": summary["temp_min"],
         "temp_max": summary["temp_max"],
-        "desc": desc
+        "desc": desc,
+        "severity": summary.get("severity", "normal") # Przekazanie znacznika semantycznego na frontend!
     }
 
 
@@ -1434,14 +1445,18 @@ def prepare_layout_data(payload, now=None):
             max_diff = float(diag.get("spread_max", diag.get("spread", 0)) or 0.0)
             min_diff = float(diag.get("spread_min", 0) or 0.0)
             
-            # 1. Baza = to, co karta /day REALNIE pokazuje w teaserze/podsumowaniu
+            # 1. PRÓG SENSOWNOŚCI: Tniemy u źródła, jeśli żaden model nie odchyla się o min. 2 stopnie
+            if max(max_diff, min_diff) < 2.0:
+                continue
+            
+            # 2. Baza = to, co karta /day REALNIE pokazuje w zajawce weekendowej
             pick = pick_hours_for_daily_summary(all_hours, daily_diag, date_str)
             base_summary = _build_day_summary(pick.hp, date_str, is_night_mode=False)
             
             if not base_summary:
                 continue
                 
-            # 2. Wybór: rozjazd dotyczy "day" czy "night"?
+            # 3. Wybór: rozjazd dotyczy "day" czy "night"?
             if max_diff >= min_diff:
                 pora = t(lang, "diff_day")
                 base_val = int(base_summary["temp_max"])
@@ -1456,11 +1471,11 @@ def prepare_layout_data(payload, now=None):
                 
             alt_val = int(round(float(alt_temp)))
             
-            # 3. TWARDY WARUNK +/-: Różnica musi wynosić co najmniej 2 stopnie
+            # 4. TWARDY WARUNEK: Rozbieżność musi wynosić min. 2 stopnie
             if abs(alt_val - base_val) < 2:
                 continue
                 
-            # 4. Składanie bezpiecznego alertu do sekcji "Watch out"
+            # 5. Składanie pełnego alertu z ikoną do sekcji "Uważaj"
             try:
                 dt = datetime.strptime(date_str, "%Y-%m-%d")
                 event_key = "alert_diag_event_sat" if dt.weekday() == 5 else "alert_diag_event_sun"
