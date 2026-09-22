@@ -954,6 +954,8 @@ REPLACEMENTS = {
         ("przejaśnienia", "partly cloudy"),
         ("dużo chmur", "mostly cloudy"),
         ("pochmurno", "overcast"),
+        ("(przelotnie)", "(passing)"),
+        ("przelotnie", "passing"),
         
         # === WORTH KNOWING (Dziś warto wiedzieć) - Kawałki dynamicznych zdań ===
         ("ryzyko burzy: modele wskazują dziś na", "storm risk: models indicate a"),
@@ -1247,6 +1249,8 @@ REPLACEMENTS = {
         (" km/h) — na plaży mocniej.", " km/h) — plus fort sur la plage."),
         ("Wybrzeże", "Côte"),
         ("(satelita)", "(satellite)"),
+        ("(przelotnie)", "(passager)"),
+        ("przelotnie", "passager"),
          
     ],
     "de": [
@@ -1446,6 +1450,8 @@ REPLACEMENTS = {
         (" km/h) — na plaży mocniej.", " km/h) — stronger on the beach."),
         ("Wybrzeże", "Küste"),
         ("(satelita)", "(Satellit)"),
+        ("(przelotnie)", "(vorübergehend)"),
+        ("przelotnie", "vorübergehend"),
         
     
     ],
@@ -1648,6 +1654,8 @@ REPLACEMENTS = {
         (" km/h) — na plaży mocniej.", " km/h) — más fuerte en la playa."),
         ("Wybrzeże", "Costa"),
         ("(satelita)", "(satélite)"),
+        ("(przelotnie)", "(pasajero)"),
+        ("przelotnie", "pasajero"),
         
         ],
     "no": [
@@ -1850,6 +1858,8 @@ REPLACEMENTS = {
         (" km/h) — na plaży mocniej.", " km/h) — sterkere på stranden."),
         ("Wybrzeże", "Kyst"),
         ("(satelita)", "(satellitt)"),
+        ("(przelotnie)", "(forbigående)"),
+        ("przelotnie", "forbigående"),
         
     ]
 }

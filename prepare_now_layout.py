@@ -437,7 +437,7 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
                 break
 
     # ==================================================================
-    # ZAKOTWICZENIE CZASOWE DLA HERO W /NOW ("TERAZ" / "OBECNIE")
+    # ZAKOTWICZENIE CZASOWE DLA HERO W /NOW ("OBECNIE")
     # ==================================================================
     if sky_desc:
         # 1. Tłumaczymy czystą bazę (np. "Bezchmurnie, pogoda jak kryształ"),
@@ -447,15 +447,15 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
             
         sky_desc_low = sky_desc[:1].lower() + sky_desc[1:]
         
-        # 2. Dodajemy przedrostki z uwzględnieniem wybranego języka
-        if h0.get("_radar_changed_label") and max_precip_4h == 0:
-            obecnie = {"en": "Currently", "de": "Aktuell", "fr": "Actuellement", "es": "Actualmente", "no": "For øyeblikket", "nb": "For øyeblikket"}.get(lang, "Obecnie")
-            sky_desc = f"{obecnie} {sky_desc_low} (satelita)"
-        else:
-            teraz = {"en": "Now", "de": "Jetzt", "fr": "Maintenant", "es": "Ahora", "no": "Nå", "nb": "Nå"}.get(lang, "Teraz")
-            sky_desc = f"{teraz} {sky_desc_low}"
+        # 2. Tłumaczymy samo słowo wprowadzające
+        obecnie_str = "Obecnie"
+        if lang != "pl":
+            obecnie_str = translate_weather_text("obecnie", lang)
+        
+        # 3. Sklejamy z TWARDĄ spacją w kodzie (strip() usuwa ewentualne spacje ze słownika)
+        sky_desc = f"{obecnie_str.strip()} {sky_desc_low}"
             
-        # 3. Podniesienie pierwszej litery całego zdania
+        # 4. Podniesienie pierwszej litery całego zdania
         sky_desc = sky_desc[:1].upper() + sky_desc[1:]
 
     # Bezpieczne klejenie drugiej linii Hero (Wiatr + Ciśnienie)
@@ -471,7 +471,7 @@ def prepare_now_layout_data(payload: dict, now: datetime = None) -> dict:
         hero_line2_parts.append(f"{round(pressure_hpa)} hPa {arr}")
         
     hero_line2 = " · ".join(hero_line2_parts)
-    hero_summary = f"{sky_desc}\n{hero_line2}" if hero_line2 else sky_desc 
+    hero_summary = f"{sky_desc}\n{hero_line2}" if hero_line2 else sky_desc
 
     # --- BUDOWA 12 BLOKÓW GODZINOWYCH ---
     today_blocks = []

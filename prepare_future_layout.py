@@ -62,25 +62,36 @@ def prepare_future_layout_data(payload, now=None):
             if ENABLE_VOLATILITY_UI and diag.get("is_volatile"):
                 if diag.get("n_om", 0) >= 6 and diag.get("n_yr", 0) >= 3:
                     
-                    # SPRAWDZAMY, CZY DZIEŃ JEST SPOKOJNY
+                    # Sprawdzamy czy dzień jest spokojny (brak ekstremów opadowych/wiatrowych)
                     icon_name = summary.get("icon", "")
                     has_bad_weather = bool(summary.get("precip_badge")) or any(x in icon_name for x in ["rain", "storm", "snow", "sleet", "showers", "wind"])
                     
                     if not has_bad_weather:
-                        max_diff = diag.get("spread_max", diag.get("spread", 0))
-                        min_diff = diag.get("spread_min", 0)
+                        max_diff = float(diag.get("spread_max", diag.get("spread", 0)) or 0.0)
+                        min_diff = float(diag.get("spread_min", 0) or 0.0)
                         
                         if max_diff >= min_diff:
-                            alt_temp = diag.get("max_om")
+                            alt_temp = diag.get("max_yr") if pick.source == "openmeteo" else diag.get("max_om")
                             pora_text = t(lang, "diff_day")
+                            base_val = summary.get("temp_max")
                         else:
-                            alt_temp = diag.get("min_om")
+                            alt_temp = diag.get("min_yr") if pick.source == "openmeteo" else diag.get("min_om")
                             pora_text = t(lang, "diff_night")
+                            base_val = summary.get("temp_min")
                             
-                        alt_val = int(round(alt_temp)) if alt_temp is not None else "?"
-                        warn_text = t(lang, "alt_model")
-                        
-                        summary["descriptor"] = f"⚠️ {warn_text} {alt_val}°C {pora_text}"
+                        if alt_temp is not None and base_val is not None:
+                            alt_val = int(round(float(alt_temp)))
+                            
+                            # TWARDY WARUNK +/-: Różnica musi wynosić co najmniej 2 stopnie
+                            if abs(alt_val - int(base_val)) >= 2:
+                                warn_text = t(lang, "alt_model")
+                                alert_str = f"⚠️ {warn_text}: {alt_val}°C {pora_text}"
+                                
+                                # Doklejamy do opisu bez niszczenia stanu pogody
+                                if summary.get("descriptor"):
+                                    summary["descriptor"] = f"{summary['descriptor']} · {alert_str}"
+                                else:
+                                    summary["descriptor"] = alert_str
             # --------------------------------------------------------------
 
             short_day_name = DAYS_SHORT.get(lang, DAYS_SHORT["pl"])[tgt.weekday()]

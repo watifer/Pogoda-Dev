@@ -846,33 +846,6 @@ def _build_weekend_day_teaser(hp: list, day_short: str, payload: dict = None) ->
     desc = summary.get("precip_badge") or summary.get("descriptor") or "Brak danych"
     desc = desc[0].upper() + desc[1:] if desc else ""
     
-    if payload:
-        ENABLE_VOLATILITY_UI = os.getenv("ENABLE_VOLATILITY_UI", "1") == "1"
-        diag = payload.get("daily_diag", {}).get(date_str, {})
-        
-        if ENABLE_VOLATILITY_UI and diag.get("is_volatile"):
-            if diag.get("n_om", 0) >= 6 and diag.get("n_yr", 0) >= 3:
-                
-                icon_name = summary.get("icon", "")
-                has_bad_weather = bool(summary.get("precip_badge")) or any(x in icon_name for x in ["rain", "storm", "snow", "sleet", "showers", "wind"])
-                
-                if not has_bad_weather:
-                    lang = str(payload.get("lang", "pl")).strip().lower()[:2]
-                    warn_text = t(lang, "alt_model")
-                    
-                    max_diff = diag.get("spread_max", diag.get("spread", 0))
-                    min_diff = diag.get("spread_min", 0)
-                    
-                    if max_diff >= min_diff:
-                        alt_temp = diag.get("max_om")
-                        pora_text = t(lang, "diff_day")
-                    else:
-                        alt_temp = diag.get("min_om")
-                        pora_text = t(lang, "diff_night")
-                    
-                    alt_val = int(round(alt_temp)) if alt_temp is not None else "?"
-                    desc = f"⚠️ {warn_text} {alt_val}°C {pora_text}"
-    
     return {
         "label": day_short,
         "date_short": date_short_formatted,
@@ -1435,9 +1408,74 @@ def prepare_layout_data(payload, now=None):
         target_sat = (now + timedelta(days=(5 - now.weekday()) % 7)).strftime("%Y-%m-%d")
         target_sun = (now + timedelta(days=(6 - now.weekday()) % 7)).strftime("%Y-%m-%d")
         
-        for date_str, diag in daily_diag.items():
-            if date_str not in [target_sat, target_sun]:
+        MAX_VOLATILITY_DAY_HORIZON = int(os.environ.get("MAX_VOLATILITY_DAY_HORIZON", "3"))
+        
+        from daily_source import pick_hours_for_daily_summary
+        all_hours = payload.get("hours", [])
+
+        for date_str in (target_sat, target_sun):
+            diag = daily_diag.get(date_str)
+            if not diag:
                 continue
+                
+            # --- FILTR HORYZONTU CZASOWEGO ---
+            try:
+                dt_evt = datetime.strptime(date_str, "%Y-%m-%d").date()
+                days_ahead = (dt_evt - now.date()).days
+                if days_ahead < 0 or days_ahead > MAX_VOLATILITY_DAY_HORIZON:
+                    continue
+            except ValueError:
+                continue
+            # ---------------------------------
+                
+            if not (diag.get("is_volatile") and diag.get("n_om", 0) >= 6 and diag.get("n_yr", 0) >= 3):
+                continue
+                
+            max_diff = float(diag.get("spread_max", diag.get("spread", 0)) or 0.0)
+            min_diff = float(diag.get("spread_min", 0) or 0.0)
+            
+            # 1. Baza = to, co karta /day REALNIE pokazuje w teaserze/podsumowaniu
+            pick = pick_hours_for_daily_summary(all_hours, daily_diag, date_str)
+            base_summary = _build_day_summary(pick.hp, date_str, is_night_mode=False)
+            
+            if not base_summary:
+                continue
+                
+            # 2. Wybór: rozjazd dotyczy "day" czy "night"?
+            if max_diff >= min_diff:
+                pora = t(lang, "diff_day")
+                base_val = int(base_summary["temp_max"])
+                alt_temp = diag.get("max_yr") if pick.source == "openmeteo" else diag.get("max_om")
+            else:
+                pora = t(lang, "diff_night")
+                base_val = int(base_summary["temp_min"])
+                alt_temp = diag.get("min_yr") if pick.source == "openmeteo" else diag.get("min_om")
+                
+            if alt_temp is None:
+                continue
+                
+            alt_val = int(round(float(alt_temp)))
+            
+            # 3. TWARDY WARUNK +/-: Różnica musi wynosić co najmniej 2 stopnie
+            if abs(alt_val - base_val) < 2:
+                continue
+                
+            # 4. Składanie bezpiecznego alertu do sekcji "Watch out"
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d")
+                event_key = "alert_diag_event_sat" if dt.weekday() == 5 else "alert_diag_event_sun"
+                
+                desc_template = t(lang, "alert_diag_desc")
+                desc_text = desc_template.format(temp=alt_val, pora=pora)
+                
+                sender_text = f"⚠️ {t(lang, 'alert_diag_sender')}"
+                final_alert = f"{sender_text} — {t(lang, event_key)}. {desc_text}"
+                
+                if final_alert not in alerts:
+                    alerts.append(final_alert)
+            except ValueError:
+                continue
+            # ---------------------------------
                 
             if diag.get("is_volatile") and diag.get("n_om", 0) >= 6 and diag.get("n_yr", 0) >= 3:
                 try:
@@ -1627,8 +1665,8 @@ def prepare_layout_data(payload, now=None):
                         if not has_precip and not has_wind:
                             hero_icon = icon_live
                             
-                        # Zmiana tekstu ("Obecnie...") następuje zawsze dla lepszego kontekstu
-                        nowy_napis = f"Obecnie {label_live.lower()} (satelita)"
+                        # Zmiana tekstu ("Obecnie...") następuje zawsze dla lepszego kontekstu (czysty UX)
+                        nowy_napis = f"Obecnie {label_live.lower()}"
                         nowy_napis = nowy_napis[0].upper() + nowy_napis[1:]
                         
                         if "\n" in hero_summary_line:
