@@ -111,7 +111,7 @@ def prepare_future_layout_data(payload, now=None):
                 "temp_min": summary["temp_min"],
                 "temp_max": summary["temp_max"],
                 "precip_badge": summary["precip_badge"],
-                "descriptor": summary["descriptor"]
+                "descriptor": summary["descriptor"],
                 "severity": summary.get("severity", "normal")
             })
             all_temps.extend([summary["temp_min"], summary["temp_max"]])
