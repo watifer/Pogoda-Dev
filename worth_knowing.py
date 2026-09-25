@@ -1759,7 +1759,7 @@ def build_worth_knowing(
     if moon_candidate and moon_candidate.get("text"):
         moon_text = moon_candidate["text"]
         if moon_text.strip() and moon_text.strip() != final_text.strip():
-            final_text = f"{final_text}\n{moon_text}" if final_text else moon_text
+            final_text = f"{final_text}\n\n{moon_text}" if final_text else moon_text
 
     
 

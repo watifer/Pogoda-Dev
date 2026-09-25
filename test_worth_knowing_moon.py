@@ -219,9 +219,9 @@ def test_moon_tip_is_appended_after_existing_worth_knowing_text():
     )
 
     assert wk is not None
-    assert "\n" in wk["text"]
+    assert "\n\n" in wk["text"]
     assert wk["text"].endswith(MOON_TIP_TEXTS["full_today"])
-    assert wk["text"].split("\n", 1)[0] != MOON_TIP_TEXTS["full_today"]
+    assert wk["text"].split("\n\n", 1)[0] != MOON_TIP_TEXTS["full_today"]
 
 
 def test_moon_tip_i18n_uses_real_translate_weather_text_path():
