@@ -328,11 +328,13 @@ def _night_weather_allows_moon_tip(night_hours: List[Dict], all_hours: List[Dict
 
 
 def _build_moon_night_candidate(payload: dict, alerts: List[str] = None, trust_block: bool = False) -> Optional[Dict]:
+    """Buduje dodatkowy tip o jasnej nocy.
+
+    `alerts` i `trust_block` zostają w sygnaturze dla kompatybilności testów/wywołań,
+    ale celowo NIE blokują tego dodatku: komunikaty z sekcji „Uważaj" oraz inne
+    wnioski „Warto wiedzieć" mogą współistnieć z informacją o Księżycu.
+    """
     if os.environ.get("ENABLE_WK_MOON_TIP", "1") == "0":
-        return None
-    if alerts:
-        return None
-    if trust_block:
         return None
     if " + " not in str(payload.get("forecast_source", "")):
         return None
@@ -1514,15 +1516,14 @@ def build_worth_knowing(
     if ta:
         candidates += _candidates_future(ta)
 
-    # Rzadki lifestyle tip: pogodna noc + Księżyc blisko pełni.
-    # Twardo milczy przy alertach i trust_block, bo ma wx=[] i nie może konkurować z ostrzeżeniami.
+    # Dodatkowy tip o jasnej nocy: NIE konkuruje w rankingu WK i NIE jest blokowany
+    # przez sekcję „Uważaj”. Jeśli spełni własne warunki meteo/astronomiczne,
+    # zostanie dopisany na końcu tekstu „Warto wiedzieć”.
     moon_candidate = _build_moon_night_candidate(payload, alerts=alerts, trust_block=trust_block)
-    if moon_candidate:
-        candidates.append(moon_candidate)
         
     candidates = [enforce_priority_policy(c) for c in candidates]
 
-    if not candidates:
+    if not candidates and not moon_candidate:
         return None
 
     scored = []
@@ -1532,6 +1533,11 @@ def build_worth_knowing(
             scored.append((s, c))
 
     if not scored:
+        if moon_candidate:
+            return {
+                "title": "Dziś warto wiedzieć",
+                "text": moon_candidate["text"],
+            }
         return None
 
     scored.sort(key=lambda x: x[0])
@@ -1547,12 +1553,22 @@ def build_worth_knowing(
 
     # Bezpieczny fallback
     if winner is None:
+        if moon_candidate:
+            return {
+                "title": "Dziś warto wiedzieć",
+                "text": moon_candidate["text"],
+            }
         return None
         
     # --- Trust gating jako filtr stylu (nie zabijamy twardych wskazówek) ---
     if trust_block:
         # 1) lifestyle zawsze milczy w dni niepewne
         if winner.get("category") in LIFESTYLE_CATEGORIES:
+            if moon_candidate:
+                return {
+                    "title": "Dziś warto wiedzieć",
+                    "text": moon_candidate["text"],
+                }
             return None
 
         # 2) jeśli brak hazard wx i nie jest wyjątkiem -> milczymy
@@ -1567,6 +1583,11 @@ def build_worth_knowing(
         has_hazard = any(t in HAZARD_WX for t in wx_tags)
 
         if (not has_hazard) and (winner.get("category") not in PRIORITY_EXEMPT_CATEGORIES):
+            if moon_candidate:
+                return {
+                    "title": "Dziś warto wiedzieć",
+                    "text": moon_candidate["text"],
+                }
             return None
 
     
@@ -1734,6 +1755,11 @@ def build_worth_knowing(
     if len(final_text) > MAX_WK_LEN + 5:
         truncated = final_text[:MAX_WK_LEN].rsplit(' ', 1)[0]
         final_text = truncated + "…"
+
+    if moon_candidate and moon_candidate.get("text"):
+        moon_text = moon_candidate["text"]
+        if moon_text.strip() and moon_text.strip() != final_text.strip():
+            final_text = f"{final_text}\n{moon_text}" if final_text else moon_text
 
     
 

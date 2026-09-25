@@ -150,7 +150,8 @@ def test_build_moon_candidate_and_alert_gating():
     assert c["priority"] == 14
     assert c["text"] == MOON_TIP_TEXTS["full_today"]
 
-    assert _build_moon_night_candidate(payload, alerts=["Burze"]) is None
+    # Alerty z sekcji „Uważaj" nie blokują już dopisku księżycowego w „Warto wiedzieć".
+    assert _build_moon_night_candidate(payload, alerts=["Burze"]) is not None
 
     one_model = dict(payload)
     one_model["forecast_source"] = "OpenMeteo"
@@ -177,7 +178,7 @@ def test_build_worth_knowing_can_return_moon_tip_when_no_stronger_candidate():
     assert wk is not None
     assert wk["text"] == MOON_TIP_TEXTS["full_today"]
 
-    assert build_worth_knowing(
+    wk_alert = build_worth_knowing(
         payload=payload,
         blocks=[],
         alerts=["Silny wiatr"],
@@ -189,7 +190,38 @@ def test_build_worth_knowing_can_return_moon_tip_when_no_stronger_candidate():
         built_blocks=[],
         ta=[],
         current_hour=8,
-    ) is None
+    )
+    assert wk_alert is not None
+    assert wk_alert["text"] == MOON_TIP_TEXTS["full_today"]
+
+
+def test_moon_tip_is_appended_after_existing_worth_knowing_text():
+    target = _REF_FULL_MOON_UTC.replace(hour=2, minute=0)
+    payload = _payload_for_target_midpoint(target, lat=0.0, lon=0.0, high=90)
+    base_dt = target - timedelta(days=1)
+    ta = [
+        {**_make_hour(base_dt.replace(hour=h, minute=0), "openmeteo"), "temp_c": temp, "wind_kmh": 4, "gust_kmh": 6}
+        for h, temp in [(8, 19), (9, 20), (10, 21), (11, 22)]
+    ]
+
+    wk = build_worth_knowing(
+        payload=payload,
+        blocks=[],
+        alerts=["Upał — test alertu w sekcji Uważaj"],
+        temp_min=18,
+        temp_max=22,
+        max_wind=5,
+        gust_kmh=8,
+        total_precip_mm=0,
+        built_blocks=[],
+        ta=ta,
+        current_hour=8,
+    )
+
+    assert wk is not None
+    assert "\n" in wk["text"]
+    assert wk["text"].endswith(MOON_TIP_TEXTS["full_today"])
+    assert wk["text"].split("\n", 1)[0] != MOON_TIP_TEXTS["full_today"]
 
 
 def test_moon_tip_i18n_uses_real_translate_weather_text_path():
